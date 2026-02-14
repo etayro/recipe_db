@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>המטבח של הפוכים</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=Fredoka+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <h1 class="logo" id="appTitle">המטבח של הפוכים</h1>
+      <button class="lang-toggle" id="langToggle" title="Switch to English">EN</button>
+    </div>
+    <div class="search-area">
+      <input type="text" id="searchInput" class="search-input" placeholder="חפש מתכונים, תוויות או מרכיבים...">
+      <button class="filter-toggle-btn" id="filterToggleBtn">
+        <span id="filterIcon">&#9660;</span>
+      </button>
+    </div>
+    <div class="filter-panel hidden" id="filterPanel">
+      <div class="filter-labels" id="filterLabels"></div>
+      <div class="tried-toggle">
+        <label class="toggle-label">
+          <input type="checkbox" id="triedToggle" checked>
+          <span id="triedLabel">הצג רק מנוסים</span>
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="recipes-header">
+      <h2 id="recipesTitle">מתכונים</h2>
+      <button class="add-btn" id="addRecipeBtn">+</button>
+    </div>
+    <section class="recipe-grid" id="recipeGrid"></section>
+  </main>
+
+  <!-- Recipe Detail Modal -->
+  <div class="modal-overlay hidden" id="detailModal">
+    <div class="modal-content detail-modal">
+      <button class="modal-close" id="detailClose">&times;</button>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <!-- Recipe Form Modal -->
+  <div class="modal-overlay hidden" id="formModal">
+    <div class="modal-content form-modal">
+      <button class="modal-close" id="formClose">&times;</button>
+      <h2 id="formTitle">מתכון חדש</h2>
+
+      <!-- Input Mode Tabs -->
+      <div class="form-tabs" id="formTabs">
+        <button type="button" class="form-tab active" data-tab="freetext" id="tabFreetext">טקסט חופשי</button>
+        <button type="button" class="form-tab" data-tab="manual" id="tabManual">ידני</button>
+      </div>
+
+      <form id="recipeForm">
+        <input type="hidden" id="formRecipeId">
+
+        <!-- Free Text Tab -->
+        <div class="tab-content active" id="freetextContent">
+          <div class="form-group">
+            <label id="labelFreetext">הדביקו מתכון כאן <span class="required-mark">*</span></label>
+            <textarea id="formFreetext" rows="12" placeholder="הדביקו מתכון מלא כאן - הכותרת, המרכיבים והוראות ההכנה יזוהו אוטומטית..."></textarea>
+          </div>
+        </div>
+
+        <!-- Manual Tab -->
+        <div class="tab-content" id="manualContent">
+          <div class="form-group">
+            <label id="labelTitle">שם המתכון <span class="required-mark">*</span></label>
+            <input type="text" id="formTitle_input">
+          </div>
+          <div class="form-group">
+            <label id="labelDesc">תיאור</label>
+            <textarea id="formDesc" rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label id="labelIngredients">מרכיבים <span class="required-mark">*</span></label>
+            <div class="ingredients-list" id="ingredientsList"></div>
+            <button type="button" class="add-ingredient-btn" id="addIngredientBtn">+ הוסף מרכיב</button>
+          </div>
+          <div class="form-group">
+            <label id="labelInstructions">הוראות הכנה <span class="required-mark">*</span></label>
+            <textarea id="formInstructions" rows="5"></textarea>
+          </div>
+        </div>
+
+        <!-- Shared fields (both tabs) -->
+        <div class="form-group">
+          <label id="labelImageUrl">תמונה</label>
+          <div class="image-upload-row">
+            <input type="text" id="formImageUrl" placeholder="קישור לתמונה...">
+            <label class="browse-btn" id="browseLabel">
+              <span id="browseText">עיון</span>
+              <input type="file" id="formImageFile" accept="image/*" hidden>
+            </label>
+          </div>
+          <div class="image-preview hidden" id="imagePreview">
+            <img id="previewImg" src="" alt="preview">
+            <button type="button" class="remove-preview" id="removePreview">&times;</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label id="labelLabels">תוויות</label>
+          <div class="form-labels" id="formLabels"></div>
+          <div class="new-label-row">
+            <input type="text" id="newLabelHe" placeholder="תווית חדשה בעברית">
+            <input type="text" id="newLabelEn" placeholder="New label in English">
+            <button type="button" class="new-label-btn" id="addLabelBtn">+</button>
+          </div>
+        </div>
+
+        <div class="form-row form-row-inline">
+          <div class="form-group">
+            <label class="toggle-label">
+              <input type="checkbox" id="formTried">
+              <span id="labelTried">ניסינו</span>
+            </label>
+          </div>
+          <div class="form-group" id="ratingGroup">
+            <label id="labelRating">דירוג (1-10)</label>
+            <input type="number" id="formRating" min="1" max="10" step="0.5">
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="formSubmitBtn">שמור</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
