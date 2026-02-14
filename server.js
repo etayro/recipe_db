@@ -165,17 +165,46 @@ app.get('/api/recipes', (req, res) => {
 
     const allRecipes = db.prepare(sql).all(...params);
 
+    // Attach labels to recipes for label-based fuzzy matching
+    const labelStmtForSearch = db.prepare('SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?');
+    for (const recipe of allRecipes) {
+      recipe._labels = labelStmtForSearch.all(recipe.id);
+    }
+
+    // Also get all labels for fuzzy matching
+    const allLabels = db.prepare('SELECT * FROM labels').all();
+
     // Now score each recipe against search/ingredient terms
     const searchTokens = search ? search.split(/[\s,،]+/).map(t => t.trim()).filter(Boolean) : [];
     const ingrTokens = ingredients ? ingredients.split(',').map(t => t.trim()).filter(Boolean) : [];
     const allTokens = [...searchTokens, ...ingrTokens];
 
+    // Pre-compute fuzzy label matches for each token
+    const tokenLabelMatches = {};
+    for (const token of allTokens) {
+      tokenLabelMatches[token] = [];
+      for (const label of allLabels) {
+        const result = fuzzyMatchesLabel(token, label);
+        if (result.match) {
+          tokenLabelMatches[token].push({ labelId: label.id, score: result.score });
+        }
+      }
+    }
+
     const scored = allRecipes.map(recipe => {
       let totalScore = 0;
       let allMatch = true;
+      const recipeLabelIds = new Set((recipe._labels || []).map(l => l.id));
 
       for (const token of allTokens) {
         let tokenScore = 0;
+
+        // Check fuzzy label match
+        for (const lm of tokenLabelMatches[token]) {
+          if (recipeLabelIds.has(lm.labelId)) {
+            tokenScore = Math.max(tokenScore, lm.score);
+          }
+        }
 
         // Check title/description
         const titleHe = (recipe.title_he || '').toLowerCase();
@@ -222,10 +251,10 @@ app.get('/api/recipes', (req, res) => {
       })
       .map(s => s.recipe);
 
-    // Attach labels
-    const labelStmt = db.prepare('SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?');
+    // Attach labels (reuse already-fetched _labels)
     for (const recipe of results) {
-      recipe.labels = labelStmt.all(recipe.id);
+      recipe.labels = recipe._labels || [];
+      delete recipe._labels;
     }
 
     return res.json(results);
