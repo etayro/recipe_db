@@ -11,16 +11,84 @@ let formIngredients = [];
 let detailUnitSystem = 'metric'; // 'metric' or 'imperial'
 let currentDetailRecipe = null;
 
+// === i18n ===
+const translationsCache = {};
+let currentTranslations = {};
+
+const LANGUAGES = [
+  { code: 'he', name: 'עברית', dir: 'rtl' },
+  { code: 'en', name: 'English', dir: 'ltr' },
+  { code: 'it', name: 'Italiano', dir: 'ltr' },
+  { code: 'ru', name: 'Русский', dir: 'ltr' },
+  { code: 'de', name: 'Deutsch', dir: 'ltr' },
+  { code: 'nl', name: 'Nederlands', dir: 'ltr' },
+];
+
+function getLangDir(code) {
+  const l = LANGUAGES.find(x => x.code === code);
+  return l ? l.dir : 'ltr';
+}
+
+async function loadTranslations(langCode) {
+  if (translationsCache[langCode]) {
+    currentTranslations = translationsCache[langCode];
+    return;
+  }
+  try {
+    const res = await fetch(`/i18n/${langCode}.json`);
+    const data = await res.json();
+    translationsCache[langCode] = data;
+    currentTranslations = data;
+  } catch {
+    // Fallback to English
+    if (langCode !== 'en') await loadTranslations('en');
+  }
+}
+
+function t(key) {
+  return currentTranslations[key] || key;
+}
+
+// === On-the-fly recipe translation cache ===
+// Key: `${recipeId}_${field}_${lang}`, Value: translated string
+const recipeTranslationCache = {};
+
+async function getRecipeField(recipe, prop) {
+  // HE and EN are stored in DB directly
+  if (lang === 'he' || lang === 'en') {
+    return recipe[`${prop}_${lang}`] || recipe[`${prop}_he`] || '';
+  }
+  // For other languages, translate from EN on the fly
+  const enValue = recipe[`${prop}_en`] || recipe[`${prop}_he`] || '';
+  if (!enValue) return '';
+
+  const cacheKey = `${recipe.id}_${prop}_${lang}`;
+  if (recipeTranslationCache[cacheKey]) return recipeTranslationCache[cacheKey];
+
+  const translated = await translateText(enValue, 'en', lang);
+  recipeTranslationCache[cacheKey] = translated;
+  return translated;
+}
+
+// Sync version for cards (uses cached or falls back to EN)
+function recipePropSync(recipe, prop) {
+  if (lang === 'he' || lang === 'en') {
+    return recipe[`${prop}_${lang}`] || recipe[`${prop}_he`] || '';
+  }
+  const cacheKey = `${recipe.id}_${prop}_${lang}`;
+  if (recipeTranslationCache[cacheKey]) return recipeTranslationCache[cacheKey];
+  // Fallback to English while async translation loads
+  return recipe[`${prop}_en`] || recipe[`${prop}_he`] || '';
+}
+
 // === Unit Conversion ===
 const UNIT_OPTIONS = ['g', 'kg', 'ml', 'L', 'tsp', 'tbsp', 'cup', 'pcs'];
 
 const conversions = {
-  // metric -> imperial
   g: { to: 'oz', factor: 1 / 28.3495 },
   kg: { to: 'lbs', factor: 2.20462 },
   ml: { to: 'fl oz', factor: 1 / 29.5735 },
   L: { to: 'cups', factor: 4.22675 },
-  // imperial -> metric
   oz: { to: 'g', factor: 28.3495 },
   lbs: { to: 'kg', factor: 1 / 2.20462 },
   'fl oz': { to: 'ml', factor: 29.5735 },
@@ -33,19 +101,12 @@ const imperialUnits = new Set(['oz', 'lbs', 'fl oz', 'cups']);
 function convertIngredient(ingr, toSystem) {
   if (!ingr.qty || !ingr.unit) return ingr;
   const unit = ingr.unit;
-
   if (toSystem === 'imperial' && metricUnits.has(unit)) {
     const conv = conversions[unit];
-    if (conv) {
-      const newQty = Math.round(ingr.qty * conv.factor * 100) / 100;
-      return { ...ingr, qty: newQty, unit: conv.to };
-    }
+    if (conv) return { ...ingr, qty: Math.round(ingr.qty * conv.factor * 100) / 100, unit: conv.to };
   } else if (toSystem === 'metric' && imperialUnits.has(unit)) {
     const conv = conversions[unit];
-    if (conv) {
-      const newQty = Math.round(ingr.qty * conv.factor * 100) / 100;
-      return { ...ingr, qty: newQty, unit: conv.to };
-    }
+    if (conv) return { ...ingr, qty: Math.round(ingr.qty * conv.factor * 100) / 100, unit: conv.to };
   }
   return ingr;
 }
@@ -56,103 +117,16 @@ function formatQty(qty) {
   return String(Math.round(qty * 100) / 100);
 }
 
-// === UI Text ===
-const uiText = {
-  he: {
-    title: 'המטבח של הפוכים',
-    langBtn: 'EN',
-    searchPlaceholder: 'חפש מתכונים, תוויות או מרכיבים...',
-    recipesTitle: 'מתכונים',
-    triedLabel: 'הצג רק מנוסים',
-    tried: 'נוסה ✓',
-    notTried: 'לא נוסה',
-    formTitleNew: 'מתכון חדש',
-    formTitleEdit: 'עריכת מתכון',
-    freetext: 'טקסט חופשי',
-    manual: 'ידני',
-    freetextLabel: 'הדביקו מתכון כאן',
-    freetextPlaceholder: 'הדביקו מתכון מלא כאן - הכותרת, המרכיבים והוראות ההכנה יזוהו אוטומטית...',
-    titleLabel: 'שם המתכון',
-    descLabel: 'תיאור',
-    ingredientsLabel: 'מרכיבים',
-    instructionsLabel: 'הוראות הכנה',
-    imageLabel: 'תמונה',
-    imagePlaceholder: 'קישור לתמונה...',
-    browse: 'עיון',
-    labels: 'תוויות',
-    triedCheck: 'ניסינו',
-    rating: 'דירוג (1-10)',
-    save: 'שמור',
-    edit: 'עריכה',
-    delete: 'מחיקה',
-    deleteConfirm: 'בטוח למחוק את המתכון?',
-    ingredients: 'מרכיבים',
-    instructions: 'הוראות הכנה',
-    empty: 'לא נמצאו מתכונים',
-    addIngredient: '+ הוסף מרכיב',
-    ingredientName: 'שם מרכיב',
-    newLabelHePlaceholder: 'תווית חדשה בעברית',
-    newLabelEnPlaceholder: 'New label in English',
-    metric: 'מטרי',
-    imperial: 'אימפריאלי',
-    translating: 'מתרגם...',
-  },
-  en: {
-    title: "Hafuchim's Kitchen",
-    langBtn: 'עב',
-    searchPlaceholder: 'Search recipes, labels or ingredients...',
-    recipesTitle: 'Recipes',
-    triedLabel: 'Show only tried',
-    tried: 'Tried ✓',
-    notTried: 'Not tried',
-    formTitleNew: 'New Recipe',
-    formTitleEdit: 'Edit Recipe',
-    freetext: 'Free Text',
-    manual: 'Manual',
-    freetextLabel: 'Paste recipe here',
-    freetextPlaceholder: 'Paste a full recipe here - title, ingredients and instructions will be detected automatically...',
-    titleLabel: 'Recipe name',
-    descLabel: 'Description',
-    ingredientsLabel: 'Ingredients',
-    instructionsLabel: 'Instructions',
-    imageLabel: 'Image',
-    imagePlaceholder: 'Image URL...',
-    browse: 'Browse',
-    labels: 'Labels',
-    triedCheck: 'Tried',
-    rating: 'Rating (1-10)',
-    save: 'Save',
-    edit: 'Edit',
-    delete: 'Delete',
-    deleteConfirm: 'Are you sure you want to delete this recipe?',
-    ingredients: 'Ingredients',
-    instructions: 'Instructions',
-    empty: 'No recipes found',
-    addIngredient: '+ Add ingredient',
-    ingredientName: 'Ingredient name',
-    newLabelHePlaceholder: 'תווית חדשה בעברית',
-    newLabelEnPlaceholder: 'New label in English',
-    metric: 'Metric',
-    imperial: 'Imperial',
-    translating: 'Translating...',
-  }
-};
-
-function t(key) {
-  return uiText[lang][key] || key;
-}
-
 function labelDisplay(label) {
-  const name = lang === 'he' ? label.name_he : label.name_en;
+  const name = labelName(label);
   return label.emoji ? `${label.emoji} ${name}` : name;
 }
 
 function labelName(label) {
-  return lang === 'he' ? label.name_he : label.name_en;
-}
-
-function recipeProp(recipe, prop) {
-  return recipe[`${prop}_${lang}`] || recipe[`${prop}_he`] || '';
+  if (lang === 'he') return label.name_he;
+  if (lang === 'en') return label.name_en;
+  // For other languages, return EN (labels are short, no on-the-fly translate)
+  return label.name_en;
 }
 
 function formatRating(rating) {
@@ -177,7 +151,6 @@ async function fetchRecipes() {
     params.set('tried', 'true');
   }
 
-  // Smart search with fuzzy support
   const searchText = document.getElementById('searchInput').value.trim();
   if (searchText) {
     const { detectedLabelIds, remainingTerms } = parseSearch(searchText);
@@ -186,7 +159,6 @@ async function fetchRecipes() {
       const merged = existing ? existing + ',' + detectedLabelIds.join(',') : detectedLabelIds.join(',');
       params.set('labels', merged);
     }
-    // Send all terms as search (backend does fuzzy matching now)
     if (remainingTerms.length > 0) {
       params.set('search', remainingTerms.join(' '));
     }
@@ -197,30 +169,47 @@ async function fetchRecipes() {
 }
 
 function parseSearch(text) {
-  // Split by commas, spaces, or mixed
-  const tokens = text.split(/[\s,،]+/).map(t => t.trim()).filter(Boolean);
   const detectedLabelIds = [];
-  const remainingTerms = [];
+  let remaining = text;
 
-  for (const token of tokens) {
-    const lower = token.toLowerCase();
-    // Check exact label match (name only, not emoji)
-    const matchedLabel = labels.find(l =>
-      l.name_he === token ||
-      l.name_en.toLowerCase() === lower
-    );
-    if (matchedLabel) {
-      detectedLabelIds.push(matchedLabel.id);
-    } else {
-      remainingTerms.push(token);
+  // Sort labels by name length descending (greedy match longest first)
+  const sortedLabels = [...labels].sort((a, b) => {
+    const aLen = Math.max(a.name_he.length, a.name_en.length);
+    const bLen = Math.max(b.name_he.length, b.name_en.length);
+    return bLen - aLen;
+  });
+
+  // Try to match multi-word label names in the search text
+  for (const label of sortedLabels) {
+    const nameHe = label.name_he;
+    const nameEn = label.name_en.toLowerCase();
+
+    // Check Hebrew name
+    if (remaining.includes(nameHe)) {
+      detectedLabelIds.push(label.id);
+      remaining = remaining.replace(nameHe, ' ').trim();
+      continue;
+    }
+
+    // Check English name (case-insensitive)
+    const lowerRemaining = remaining.toLowerCase();
+    const idx = lowerRemaining.indexOf(nameEn);
+    if (idx !== -1) {
+      detectedLabelIds.push(label.id);
+      remaining = (remaining.substring(0, idx) + ' ' + remaining.substring(idx + nameEn.length)).trim();
+      continue;
     }
   }
+
+  // Tokenize whatever is left
+  const remainingTerms = remaining.split(/[\s,،]+/).map(t => t.trim()).filter(Boolean);
 
   return { detectedLabelIds, remainingTerms };
 }
 
 // === Translation ===
 async function translateText(text, from, to) {
+  if (!text || from === to) return text;
   try {
     const res = await fetch('/api/translate', {
       method: 'POST',
@@ -234,6 +223,17 @@ async function translateText(text, from, to) {
   }
 }
 
+// === Language Detection ===
+function detectInputLang(text) {
+  // Check for Hebrew characters
+  if (/[\u0590-\u05FF]/.test(text)) return 'he';
+  // Check for Russian/Cyrillic
+  if (/[\u0400-\u04FF]/.test(text)) return 'ru';
+  // Default to current lang if it uses Latin script, otherwise English
+  if (['en', 'it', 'de', 'nl'].includes(lang)) return lang;
+  return 'en';
+}
+
 // === Free Text Parser ===
 function parseFreeText(text) {
   const lines = text.split('\n').map(l => l.trim());
@@ -242,43 +242,65 @@ function parseFreeText(text) {
   let ingredients = [];
   let instructions = '';
 
-  const ingrHeaders = /^(ingredients|מרכיבים|חומרים|רכיבים)/i;
-  const instrHeaders = /^(instructions|הוראות|אופן ההכנה|הכנה|directions|steps|שלבי הכנה|method|preparation)/i;
-  const sectionHeader = /^(.+):\s*$/;
+  const ingrHeaders = /^(ingredients|מרכיבים|חומרים|רכיבים|ingredienti|zutaten|ingrediënten|ингредиенты)\s*:?\s*$/i;
+  const instrHeaders = /^(instructions|הוראות|אופן ההכנה|הכנה|directions|steps|שלבי הכנה|method|preparation|istruzioni|anleitung|zubereitung|instructies|bereiding|инструкции|приготовление)\s*:?\s*$/i;
 
-  let section = 'title'; // title -> description -> ingredients -> instructions
+  // Detect if a line looks like an ingredient (has quantity/unit/bullet)
+  const looksLikeIngredient = (line) => {
+    return /^[\d½¼¾⅓⅔⅛]/.test(line) || /^[\-–•·*]\s*\d/.test(line) || /^[\-–•·*]\s+/.test(line);
+  };
+
+  let section = 'title';
   let foundTitle = false;
 
-  for (const line of lines) {
-    if (!line) continue;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) {
+      // Blank line after ingredients could signal instructions
+      if (section === 'ingredients' && ingredients.length > 0) {
+        // Look ahead: if next non-empty line doesn't look like an ingredient, switch to instructions
+        const nextNonEmpty = lines.slice(i + 1).find(l => l.trim());
+        if (nextNonEmpty && !looksLikeIngredient(nextNonEmpty) && !ingrHeaders.test(nextNonEmpty)) {
+          section = 'instructions';
+        }
+      }
+      continue;
+    }
 
     // Check for section headers
-    if (ingrHeaders.test(line) || (sectionHeader.test(line) && ingrHeaders.test(line.replace(':', '')))) {
+    if (ingrHeaders.test(line)) {
       section = 'ingredients';
       continue;
     }
-    if (instrHeaders.test(line) || (sectionHeader.test(line) && instrHeaders.test(line.replace(':', '')))) {
+    if (instrHeaders.test(line)) {
       section = 'instructions';
       continue;
     }
 
     if (!foundTitle) {
-      title = line;
-      foundTitle = true;
-      section = 'description';
-      continue;
+      // First line is title if it's short and doesn't have quantities
+      if (line.length < 100 && !looksLikeIngredient(line)) {
+        title = line.replace(/^#+\s*/, ''); // Strip markdown headings
+        foundTitle = true;
+        section = 'description';
+        continue;
+      } else {
+        // First line looks like an ingredient, skip title
+        foundTitle = true;
+        section = 'ingredients';
+      }
     }
 
     if (section === 'description') {
-      // Check if this looks like an ingredient line (starts with number or bullet)
-      if (/^[\d½¼¾⅓⅔⅛•\-–]/.test(line) || /^\d/.test(line)) {
+      // If this line looks like an ingredient, transition
+      if (looksLikeIngredient(line)) {
         section = 'ingredients';
       }
     }
 
     if (section === 'ingredients') {
-      // Check if we've hit instructions (numbered steps like "1.", prose paragraphs)
-      if (/^(שלב|step)\s*\d/i.test(line)) {
+      // If line looks like a numbered instruction step (not an ingredient), switch
+      if (/^(שלב|step)\s*\d/i.test(line) || (/^\d+[.)]\s/.test(line) && !looksLikeIngredient(line) && line.length > 60)) {
         section = 'instructions';
         instructions += line + '\n';
         continue;
@@ -292,6 +314,11 @@ function parseFreeText(text) {
     }
   }
 
+  // If no title was found, generate from first ingredient or content
+  if (!title && ingredients.length > 0) {
+    title = ingredients[0].name || 'Recipe';
+  }
+
   return {
     title,
     description,
@@ -301,11 +328,8 @@ function parseFreeText(text) {
 }
 
 function parseIngredientLine(line) {
-  // Remove leading bullets, dashes, numbers with dots/parentheses
   line = line.replace(/^[\-–•·*]\s*/, '').replace(/^\d+[.)]\s*/, '').trim();
 
-  // Try to extract quantity and unit
-  // Patterns: "200g flour", "200 g flour", "2 cups milk", "½ tsp salt", "3 ביצים"
   const match = line.match(/^([\d½¼¾⅓⅔⅛/.]+(?:\s*[\d½¼¾⅓⅔⅛/.]*)?)\s*(g|kg|ml|l|tsp|tbsp|cup|cups|oz|lbs|גרם|גר|קילו|מ"ל|כוס|כוסות|כף|כפות|כפית|כפיות|יחידות|יח')?\s*(.+)/i);
 
   if (match) {
@@ -323,7 +347,6 @@ function parseFraction(str) {
   const fractions = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 0.333, '⅔': 0.667, '⅛': 0.125 };
   if (fractions[str]) return fractions[str];
 
-  // Handle "1 ½" or "1½"
   for (const [frac, val] of Object.entries(fractions)) {
     if (str.includes(frac)) {
       const whole = parseFloat(str.replace(frac, '').trim()) || 0;
@@ -331,7 +354,6 @@ function parseFraction(str) {
     }
   }
 
-  // Handle "1/2"
   if (str.includes('/')) {
     const [num, den] = str.split('/').map(Number);
     if (den) return num / den;
@@ -389,7 +411,7 @@ function renderRecipes() {
 
   container.innerHTML = recipes.map(r => `
     <div class="recipe-card" data-id="${r.id}">
-      <div class="recipe-card-title">${recipeProp(r, 'title')}</div>
+      <div class="recipe-card-title">${recipePropSync(r, 'title')}</div>
       <div class="recipe-card-labels">
         ${(r.labels || []).map(l => `<span class="label-chip">${labelDisplay(l)}</span>`).join('')}
       </div>
@@ -405,28 +427,73 @@ function renderRecipes() {
   container.querySelectorAll('.recipe-card').forEach(el => {
     el.addEventListener('click', () => showDetail(Number(el.dataset.id)));
   });
+
+  // For non-HE/EN, trigger async translation of card titles
+  if (lang !== 'he' && lang !== 'en') {
+    translateRecipeCards();
+  }
+}
+
+async function translateRecipeCards() {
+  const cards = document.querySelectorAll('.recipe-card');
+  for (const card of cards) {
+    const id = Number(card.dataset.id);
+    const recipe = recipes.find(r => r.id === id);
+    if (!recipe) continue;
+    const translated = await getRecipeField(recipe, 'title');
+    const titleEl = card.querySelector('.recipe-card-title');
+    if (titleEl) titleEl.textContent = translated;
+  }
 }
 
 async function showDetail(id) {
   const res = await fetch(`/api/recipes/${id}`);
   currentDetailRecipe = await res.json();
   detailUnitSystem = 'metric';
-  renderDetailContent();
+  await renderDetailContent();
   document.getElementById('detailModal').classList.remove('hidden');
 }
 
-function renderDetailContent() {
+async function renderDetailContent() {
   const recipe = currentDetailRecipe;
   if (!recipe) return;
 
   const content = document.getElementById('detailContent');
+
+  // Get translated fields
+  const titleText = await getRecipeField(recipe, 'title');
+  const descText = await getRecipeField(recipe, 'description');
+  const instrText = await getRecipeField(recipe, 'instructions');
+
   const hasImage = recipe.image_url && recipe.image_url.trim();
-  const ingredients = parseIngredients(recipeProp(recipe, 'ingredients'));
+
+  // For ingredients, use stored JSON for HE/EN, translate for others
+  let ingredientsRaw;
+  if (lang === 'he' || lang === 'en') {
+    ingredientsRaw = recipe[`ingredients_${lang}`] || recipe.ingredients_he;
+  } else {
+    ingredientsRaw = recipe.ingredients_en || recipe.ingredients_he;
+  }
+  const ingredients = parseIngredients(ingredientsRaw);
+
+  // Translate ingredient names for non-HE/EN
+  if (lang !== 'he' && lang !== 'en') {
+    for (let i = 0; i < ingredients.length; i++) {
+      const cacheKey = `${recipe.id}_ingr_${i}_${lang}`;
+      if (recipeTranslationCache[cacheKey]) {
+        ingredients[i].name = recipeTranslationCache[cacheKey];
+      } else {
+        const translated = await translateText(ingredients[i].name, 'en', lang);
+        recipeTranslationCache[cacheKey] = translated;
+        ingredients[i].name = translated;
+      }
+    }
+  }
 
   content.innerHTML = `
-    <div class="detail-title">${recipeProp(recipe, 'title')}</div>
-    ${hasImage ? `<img class="detail-image" src="${recipe.image_url}" alt="${recipeProp(recipe, 'title')}">` : ''}
-    ${recipeProp(recipe, 'description') ? `<p class="detail-description">${recipeProp(recipe, 'description')}</p>` : ''}
+    <div class="detail-title">${titleText}</div>
+    ${hasImage ? `<img class="detail-image" src="${recipe.image_url}" alt="${titleText}">` : ''}
+    ${descText ? `<p class="detail-description">${descText}</p>` : ''}
     <div class="detail-labels">
       ${(recipe.labels || []).map(l => `<span class="label-chip">${labelDisplay(l)}</span>`).join('')}
     </div>
@@ -450,14 +517,13 @@ function renderDetailContent() {
       }).join('')}
     </ul>
     <h3 class="detail-section-title">${t('instructions')}</h3>
-    <div class="detail-instructions">${recipeProp(recipe, 'instructions')}</div>
+    <div class="detail-instructions">${instrText}</div>
     <div class="detail-actions">
       <button class="btn-edit" onclick="openEditForm(${recipe.id})">${t('edit')}</button>
       <button class="btn-delete" onclick="deleteRecipe(${recipe.id})">${t('delete')}</button>
     </div>
   `;
 
-  // Unit toggle listeners
   content.querySelectorAll('.unit-toggle-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       detailUnitSystem = btn.dataset.system;
@@ -512,7 +578,6 @@ function renderIngredientRows() {
     </div>
   `).join('');
 
-  // Sync changes back to formIngredients
   container.querySelectorAll('.ingredient-row').forEach(row => {
     const idx = Number(row.dataset.idx);
     row.querySelectorAll('[data-field]').forEach(input => {
@@ -556,10 +621,23 @@ async function openEditForm(id) {
   document.getElementById('formRecipeId').value = recipe.id;
   document.getElementById('formFreetext').value = '';
 
-  // Fill manual fields in current language
-  document.getElementById('formTitle_input').value = recipeProp(recipe, 'title');
-  document.getElementById('formDesc').value = recipeProp(recipe, 'description');
-  document.getElementById('formInstructions').value = recipeProp(recipe, 'instructions');
+  // Fill manual fields — use HE/EN directly, for other languages translate
+  let titleVal, descVal, instrVal, ingrRaw;
+  if (lang === 'he' || lang === 'en') {
+    titleVal = recipe[`title_${lang}`] || '';
+    descVal = recipe[`description_${lang}`] || '';
+    instrVal = recipe[`instructions_${lang}`] || '';
+    ingrRaw = recipe[`ingredients_${lang}`] || '[]';
+  } else {
+    titleVal = await getRecipeField(recipe, 'title');
+    descVal = await getRecipeField(recipe, 'description');
+    instrVal = await getRecipeField(recipe, 'instructions');
+    ingrRaw = recipe.ingredients_en || recipe.ingredients_he || '[]';
+  }
+
+  document.getElementById('formTitle_input').value = titleVal;
+  document.getElementById('formDesc').value = descVal;
+  document.getElementById('formInstructions').value = instrVal;
   document.getElementById('formImageUrl').value = recipe.image_url || '';
 
   if (recipe.image_url) {
@@ -573,7 +651,13 @@ async function openEditForm(id) {
   document.getElementById('formRating').value = recipe.rating != null ? recipe.rating : '';
   document.getElementById('formTitle').textContent = t('formTitleEdit');
 
-  formIngredients = parseIngredients(recipeProp(recipe, 'ingredients'));
+  formIngredients = parseIngredients(ingrRaw);
+  // Translate ingredient names for non-HE/EN
+  if (lang !== 'he' && lang !== 'en') {
+    for (let i = 0; i < formIngredients.length; i++) {
+      formIngredients[i].name = await translateText(formIngredients[i].name, 'en', lang);
+    }
+  }
   renderIngredientRows();
 
   selectedFormLabels = new Set((recipe.labels || []).map(l => l.id));
@@ -627,7 +711,7 @@ async function handleFormSubmit(e) {
   if (currentTab === 'freetext') {
     const freetext = document.getElementById('formFreetext').value.trim();
     if (!freetext) {
-      alert(lang === 'he' ? 'יש להזין טקסט מתכון' : 'Please enter recipe text');
+      alert(t('freetextPlaceholder').split(' - ')[0] || 'Please enter recipe text');
       return;
     }
     const parsed = parseFreeText(freetext);
@@ -642,53 +726,89 @@ async function handleFormSubmit(e) {
     ingredients = formIngredients.filter(i => i.name.trim());
 
     if (!title) {
-      alert(lang === 'he' ? 'יש להזין שם מתכון' : 'Please enter a recipe name');
+      alert(t('titleLabel'));
       return;
     }
     if (ingredients.length === 0) {
-      alert(lang === 'he' ? 'יש להזין מרכיבים' : 'Please add ingredients');
+      alert(t('ingredientsLabel'));
       return;
     }
     if (!instructions) {
-      alert(lang === 'he' ? 'יש להזין הוראות הכנה' : 'Please enter instructions');
+      alert(t('instructionsLabel'));
       return;
     }
   }
 
-  // Show saving state
   const submitBtn = document.getElementById('formSubmitBtn');
   const originalText = submitBtn.textContent;
   submitBtn.textContent = t('translating');
   submitBtn.disabled = true;
 
   try {
-    // Translate to the other language
-    const fromLang = lang === 'he' ? 'he' : 'en';
-    const toLang = lang === 'he' ? 'en' : 'he';
+    // Detect the language of the input text
+    const inputLang = detectInputLang(title + ' ' + instructions);
 
-    const [translatedTitle, translatedDesc, translatedInstr] = await Promise.all([
-      translateText(title, fromLang, toLang),
-      description ? translateText(description, fromLang, toLang) : Promise.resolve(''),
-      instructions ? translateText(instructions, fromLang, toLang) : Promise.resolve(''),
-    ]);
+    // We need to produce HE and EN versions for the DB
+    let titleHe, titleEn, descHe, descEn, instrHe, instrEn, ingrHe, ingrEn;
 
-    // Translate ingredient names
-    const translatedIngredients = await Promise.all(
-      ingredients.map(async (ingr) => {
-        const translatedName = await translateText(ingr.name, fromLang, toLang);
-        return { ...ingr, name: translatedName };
-      })
-    );
+    if (inputLang === 'he') {
+      titleHe = title;
+      descHe = description;
+      instrHe = instructions;
+      ingrHe = ingredients;
+      // Translate to EN
+      [titleEn, descEn, instrEn] = await Promise.all([
+        translateText(title, 'he', 'en'),
+        description ? translateText(description, 'he', 'en') : Promise.resolve(''),
+        instructions ? translateText(instructions, 'he', 'en') : Promise.resolve(''),
+      ]);
+      ingrEn = await Promise.all(ingredients.map(async (ingr) => ({
+        ...ingr, name: await translateText(ingr.name, 'he', 'en')
+      })));
+    } else if (inputLang === 'en') {
+      titleEn = title;
+      descEn = description;
+      instrEn = instructions;
+      ingrEn = ingredients;
+      // Translate to HE
+      [titleHe, descHe, instrHe] = await Promise.all([
+        translateText(title, 'en', 'he'),
+        description ? translateText(description, 'en', 'he') : Promise.resolve(''),
+        instructions ? translateText(instructions, 'en', 'he') : Promise.resolve(''),
+      ]);
+      ingrHe = await Promise.all(ingredients.map(async (ingr) => ({
+        ...ingr, name: await translateText(ingr.name, 'en', 'he')
+      })));
+    } else {
+      // Input is in another language (it, ru, de, nl)
+      // Translate to both EN and HE
+      [titleEn, descEn, instrEn] = await Promise.all([
+        translateText(title, inputLang, 'en'),
+        description ? translateText(description, inputLang, 'en') : Promise.resolve(''),
+        instructions ? translateText(instructions, inputLang, 'en') : Promise.resolve(''),
+      ]);
+      ingrEn = await Promise.all(ingredients.map(async (ingr) => ({
+        ...ingr, name: await translateText(ingr.name, inputLang, 'en')
+      })));
+      [titleHe, descHe, instrHe] = await Promise.all([
+        translateText(title, inputLang, 'he'),
+        description ? translateText(description, inputLang, 'he') : Promise.resolve(''),
+        instructions ? translateText(instructions, inputLang, 'he') : Promise.resolve(''),
+      ]);
+      ingrHe = await Promise.all(ingredients.map(async (ingr) => ({
+        ...ingr, name: await translateText(ingr.name, inputLang, 'he')
+      })));
+    }
 
     const body = {
-      title_he: lang === 'he' ? title : translatedTitle,
-      title_en: lang === 'en' ? title : translatedTitle,
-      description_he: lang === 'he' ? description : translatedDesc,
-      description_en: lang === 'en' ? description : translatedDesc,
-      ingredients_he: JSON.stringify(lang === 'he' ? ingredients : translatedIngredients),
-      ingredients_en: JSON.stringify(lang === 'en' ? ingredients : translatedIngredients),
-      instructions_he: lang === 'he' ? instructions : translatedInstr,
-      instructions_en: lang === 'en' ? instructions : translatedInstr,
+      title_he: titleHe,
+      title_en: titleEn,
+      description_he: descHe,
+      description_en: descEn,
+      ingredients_he: JSON.stringify(ingrHe),
+      ingredients_en: JSON.stringify(ingrEn),
+      instructions_he: instrHe,
+      instructions_en: instrEn,
       image_url: imageUrl,
       tried,
       rating: tried && ratingVal ? Number(ratingVal) : null,
@@ -717,23 +837,35 @@ async function deleteRecipe(id) {
 }
 
 async function addNewLabel() {
-  const heInput = document.getElementById('newLabelHe');
-  const enInput = document.getElementById('newLabelEn');
-  const he = heInput.value.trim();
-  const en = enInput.value.trim();
-  if (!he || !en) return;
+  const input = document.getElementById('newLabelInput');
+  const name = input.value.trim();
+  if (!name) return;
+
+  // Detect input language and translate to HE and EN
+  const inputLang = detectInputLang(name);
+  let nameHe, nameEn;
+
+  if (inputLang === 'he') {
+    nameHe = name;
+    nameEn = await translateText(name, 'he', 'en');
+  } else if (inputLang === 'en') {
+    nameEn = name;
+    nameHe = await translateText(name, 'en', 'he');
+  } else {
+    nameEn = await translateText(name, inputLang, 'en');
+    nameHe = await translateText(name, inputLang, 'he');
+  }
 
   const res = await fetch('/api/labels', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name_he: he, name_en: en }),
+    body: JSON.stringify({ name_he: nameHe, name_en: nameEn }),
   });
   const newLabel = await res.json();
   labels.push(newLabel);
   selectedFormLabels.add(newLabel.id);
 
-  heInput.value = '';
-  enInput.value = '';
+  input.value = '';
   renderFormLabels();
   renderFilterLabels();
 }
@@ -757,11 +889,12 @@ async function handleImageUpload(file) {
 }
 
 // === Language ===
-function toggleLanguage() {
-  lang = lang === 'he' ? 'en' : 'he';
-  const dir = lang === 'he' ? 'rtl' : 'ltr';
+async function changeLanguage(newLang) {
+  lang = newLang;
+  const dir = getLangDir(lang);
   document.documentElement.setAttribute('dir', dir);
   document.documentElement.setAttribute('lang', lang);
+  await loadTranslations(lang);
   updateUIText();
   renderFilterLabels();
   renderRecipes();
@@ -769,7 +902,6 @@ function toggleLanguage() {
 
 function updateUIText() {
   document.getElementById('appTitle').textContent = t('title');
-  document.getElementById('langToggle').textContent = t('langBtn');
   document.getElementById('searchInput').placeholder = t('searchPlaceholder');
   document.getElementById('recipesTitle').textContent = t('recipesTitle');
   document.getElementById('triedLabel').textContent = t('triedLabel');
@@ -790,8 +922,7 @@ function updateUIText() {
   document.getElementById('labelRating').textContent = t('rating');
   document.getElementById('formSubmitBtn').textContent = t('save');
   document.getElementById('addIngredientBtn').textContent = t('addIngredient');
-  document.getElementById('newLabelHe').placeholder = t('newLabelHePlaceholder');
-  document.getElementById('newLabelEn').placeholder = t('newLabelEnPlaceholder');
+  document.getElementById('newLabelInput').placeholder = t('newLabelPlaceholder');
 }
 
 // === Load & Render ===
@@ -803,11 +934,14 @@ async function loadAndRender() {
 
 // === Init ===
 async function init() {
+  await loadTranslations(lang);
   await fetchLabels();
   await loadAndRender();
 
   // Event listeners
-  document.getElementById('langToggle').addEventListener('click', toggleLanguage);
+  document.getElementById('langSelect').addEventListener('change', (e) => {
+    changeLanguage(e.target.value);
+  });
   document.getElementById('addRecipeBtn').addEventListener('click', openAddForm);
   document.getElementById('recipeForm').addEventListener('submit', handleFormSubmit);
   document.getElementById('addLabelBtn').addEventListener('click', addNewLabel);

@@ -100,11 +100,11 @@ function fuzzyMatchesLabel(token, label) {
   // Substring match
   if (nameEn.includes(lower) || lower.includes(nameEn) || nameHe.includes(token)) return { match: true, score: 80 };
   // Fuzzy match
-  const maxDist = lower.length <= 5 ? 2 : 3;
+  const maxDist = lower.length <= 4 ? 1 : 2;
   const distEn = levenshtein(lower, nameEn);
   const distHe = levenshtein(token, nameHe);
-  if (distEn <= maxDist) return { match: true, score: 60 - distEn };
-  if (distHe <= maxDist) return { match: true, score: 60 - distHe };
+  if (distEn <= maxDist) return { match: true, score: 60 - distEn * 10 };
+  if (distHe <= maxDist) return { match: true, score: 60 - distHe * 10 };
 
   return { match: false, score: 0 };
 }
@@ -126,9 +126,9 @@ function fuzzyMatchesIngredient(token, ingredientsJson) {
     // Substring match
     if (name.includes(lower) || lower.includes(name)) { bestScore = Math.max(bestScore, 80); continue; }
     // Fuzzy match
-    const maxDist = lower.length <= 5 ? 2 : 3;
+    const maxDist = lower.length <= 4 ? 1 : 2;
     const dist = levenshtein(lower, name);
-    if (dist <= maxDist) { bestScore = Math.max(bestScore, 60 - dist); }
+    if (dist <= maxDist) { bestScore = Math.max(bestScore, 60 - dist * 10); }
   }
 
   return { match: bestScore > 0, score: bestScore };
@@ -223,14 +223,14 @@ app.get('/api/recipes', (req, res) => {
 
         // Fuzzy title match
         if (tokenScore === 0) {
-          const maxDist = lower.length <= 5 ? 2 : 3;
+          const maxDist = lower.length <= 4 ? 1 : 2;
           for (const word of titleEn.split(/\s+/)) {
             const dist = levenshtein(lower, word);
-            if (dist <= maxDist) tokenScore = Math.max(tokenScore, 50 - dist);
+            if (dist <= maxDist) tokenScore = Math.max(tokenScore, 50 - dist * 10);
           }
           for (const word of titleHe.split(/\s+/)) {
             const dist = levenshtein(lower, word);
-            if (dist <= maxDist) tokenScore = Math.max(tokenScore, 50 - dist);
+            if (dist <= maxDist) tokenScore = Math.max(tokenScore, 50 - dist * 10);
           }
         }
 
@@ -242,8 +242,10 @@ app.get('/api/recipes', (req, res) => {
     });
 
     // Show recipes where at least some tokens matched, sorted by score
+    // Require minimum average score per token to filter loose fuzzy matches
+    const minAvgScore = 30;
     const results = scored
-      .filter(s => s.totalScore > 0)
+      .filter(s => s.totalScore > 0 && (s.totalScore / allTokens.length) >= minAvgScore)
       .sort((a, b) => {
         // All-match recipes first, then by score
         if (a.allMatch !== b.allMatch) return b.allMatch - a.allMatch;

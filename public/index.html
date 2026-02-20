@@ -13,7 +13,14 @@
   <header>
     <div class="header-top">
       <h1 class="logo" id="appTitle">המטבח של הפוכים</h1>
-      <button class="lang-toggle" id="langToggle" title="Switch to English">EN</button>
+      <select class="lang-select" id="langSelect">
+        <option value="he">עברית</option>
+        <option value="en">English</option>
+        <option value="it">Italiano</option>
+        <option value="ru">Русский</option>
+        <option value="de">Deutsch</option>
+        <option value="nl">Nederlands</option>
+      </select>
     </div>
     <div class="search-area">
       <input type="text" id="searchInput" class="search-input" placeholder="חפש מתכונים, תוויות או מרכיבים...">
@@ -112,8 +119,7 @@
           <label id="labelLabels">תוויות</label>
           <div class="form-labels" id="formLabels"></div>
           <div class="new-label-row">
-            <input type="text" id="newLabelHe" placeholder="תווית חדשה בעברית">
-            <input type="text" id="newLabelEn" placeholder="New label in English">
+            <input type="text" id="newLabelInput" placeholder="תווית חדשה...">
             <button type="button" class="new-label-btn" id="addLabelBtn">+</button>
           </div>
         </div>

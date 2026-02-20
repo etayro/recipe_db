@@ -55,7 +55,7 @@ header {
   text-shadow: 2px 2px 0 rgba(0,0,0,0.15);
 }
 
-.lang-toggle {
+.lang-select {
   background: var(--warm-white);
   color: var(--burnt-orange);
   border: none;
@@ -66,11 +66,31 @@ header {
   font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.2s;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23D2691E'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 10px center;
+  padding-left: 26px;
 }
 
-.lang-toggle:hover {
-  background: var(--mustard);
+[dir="ltr"] .lang-select {
+  background-position: right 10px center;
+  padding-left: 16px;
+  padding-right: 26px;
+}
+
+.lang-select:hover {
+  background-color: var(--mustard);
   color: var(--warm-white);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23FFFDF5'/%3E%3C/svg%3E");
+}
+
+.lang-select option {
+  background: var(--warm-white);
+  color: var(--dark-brown);
+  font-weight: 500;
 }
 
 /* === Search === */
