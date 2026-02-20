@@ -2,10 +2,10 @@ const express = require('express');
 const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
-const db = require('./db');
+const { db, initDb } = require('./db');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -62,16 +62,19 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // --- Labels ---
-app.get('/api/labels', (req, res) => {
-  const labels = db.prepare('SELECT * FROM labels ORDER BY id').all();
-  res.json(labels);
+app.get('/api/labels', async (req, res) => {
+  const result = await db.execute('SELECT * FROM labels ORDER BY id');
+  res.json(result.rows);
 });
 
-app.post('/api/labels', (req, res) => {
+app.post('/api/labels', async (req, res) => {
   const { name_he, name_en, emoji } = req.body;
   if (!name_he || !name_en) return res.status(400).json({ error: 'name_he and name_en are required' });
-  const result = db.prepare('INSERT INTO labels (name_he, name_en, emoji) VALUES (?, ?, ?)').run(name_he, name_en, emoji || '');
-  res.json({ id: result.lastInsertRowid, name_he, name_en, emoji: emoji || '' });
+  const result = await db.execute({
+    sql: 'INSERT INTO labels (name_he, name_en, emoji) VALUES (?, ?, ?)',
+    args: [name_he, name_en, emoji || ''],
+  });
+  res.json({ id: Number(result.lastInsertRowid), name_he, name_en, emoji: emoji || '' });
 });
 
 // --- Fuzzy Search Helpers ---
@@ -95,11 +98,8 @@ function fuzzyMatchesLabel(token, label) {
   const nameEn = label.name_en.toLowerCase();
   const nameHe = label.name_he;
 
-  // Exact match
   if (nameEn === lower || nameHe === token) return { match: true, score: 100 };
-  // Substring match
   if (nameEn.includes(lower) || lower.includes(nameEn) || nameHe.includes(token)) return { match: true, score: 80 };
-  // Fuzzy match
   const maxDist = lower.length <= 4 ? 1 : 2;
   const distEn = levenshtein(lower, nameEn);
   const distHe = levenshtein(token, nameHe);
@@ -121,11 +121,8 @@ function fuzzyMatchesIngredient(token, ingredientsJson) {
     const name = (typeof ingr === 'string' ? ingr : ingr.name || '').toLowerCase();
     if (!name) continue;
 
-    // Exact match
     if (name === lower) { bestScore = Math.max(bestScore, 100); continue; }
-    // Substring match
     if (name.includes(lower) || lower.includes(name)) { bestScore = Math.max(bestScore, 80); continue; }
-    // Fuzzy match
     const maxDist = lower.length <= 4 ? 1 : 2;
     const dist = levenshtein(lower, name);
     if (dist <= maxDist) { bestScore = Math.max(bestScore, 60 - dist * 10); }
@@ -135,12 +132,10 @@ function fuzzyMatchesIngredient(token, ingredientsJson) {
 }
 
 // --- Recipes ---
-app.get('/api/recipes', (req, res) => {
+app.get('/api/recipes', async (req, res) => {
   const { labels: labelParam, ingredients, tried, search } = req.query;
 
-  // If we have a fuzzy search query, do it differently
   if (search || ingredients) {
-    // Get all recipes (with optional tried/label filters)
     let sql = 'SELECT DISTINCT r.* FROM recipes r';
     const joins = [];
     const conditions = [];
@@ -163,23 +158,24 @@ app.get('/api/recipes', (req, res) => {
     if (joins.length > 0) sql += ' ' + joins.join(' ');
     if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
 
-    const allRecipes = db.prepare(sql).all(...params);
+    const allRecipesResult = await db.execute({ sql, args: params });
+    const allRecipes = allRecipesResult.rows;
 
-    // Attach labels to recipes for label-based fuzzy matching
-    const labelStmtForSearch = db.prepare('SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?');
     for (const recipe of allRecipes) {
-      recipe._labels = labelStmtForSearch.all(recipe.id);
+      const labelsResult = await db.execute({
+        sql: 'SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?',
+        args: [recipe.id],
+      });
+      recipe._labels = labelsResult.rows;
     }
 
-    // Also get all labels for fuzzy matching
-    const allLabels = db.prepare('SELECT * FROM labels').all();
+    const allLabelsResult = await db.execute('SELECT * FROM labels');
+    const allLabels = allLabelsResult.rows;
 
-    // Now score each recipe against search/ingredient terms
     const searchTokens = search ? search.split(/[\s,،]+/).map(t => t.trim()).filter(Boolean) : [];
     const ingrTokens = ingredients ? ingredients.split(',').map(t => t.trim()).filter(Boolean) : [];
     const allTokens = [...searchTokens, ...ingrTokens];
 
-    // Pre-compute fuzzy label matches for each token
     const tokenLabelMatches = {};
     for (const token of allTokens) {
       tokenLabelMatches[token] = [];
@@ -199,14 +195,12 @@ app.get('/api/recipes', (req, res) => {
       for (const token of allTokens) {
         let tokenScore = 0;
 
-        // Check fuzzy label match
         for (const lm of tokenLabelMatches[token]) {
           if (recipeLabelIds.has(lm.labelId)) {
             tokenScore = Math.max(tokenScore, lm.score);
           }
         }
 
-        // Check title/description
         const titleHe = (recipe.title_he || '').toLowerCase();
         const titleEn = (recipe.title_en || '').toLowerCase();
         const descHe = (recipe.description_he || '').toLowerCase();
@@ -216,12 +210,10 @@ app.get('/api/recipes', (req, res) => {
         if (titleHe.includes(lower) || titleEn.includes(lower)) tokenScore = Math.max(tokenScore, 90);
         else if (descHe.includes(lower) || descEn.includes(lower)) tokenScore = Math.max(tokenScore, 70);
 
-        // Check ingredients
         const ingrMatchHe = fuzzyMatchesIngredient(token, recipe.ingredients_he);
         const ingrMatchEn = fuzzyMatchesIngredient(token, recipe.ingredients_en);
         tokenScore = Math.max(tokenScore, ingrMatchHe.score, ingrMatchEn.score);
 
-        // Fuzzy title match
         if (tokenScore === 0) {
           const maxDist = lower.length <= 4 ? 1 : 2;
           for (const word of titleEn.split(/\s+/)) {
@@ -241,19 +233,15 @@ app.get('/api/recipes', (req, res) => {
       return { recipe, totalScore, allMatch };
     });
 
-    // Show recipes where at least some tokens matched, sorted by score
-    // Require minimum average score per token to filter loose fuzzy matches
     const minAvgScore = 30;
     const results = scored
       .filter(s => s.totalScore > 0 && (s.totalScore / allTokens.length) >= minAvgScore)
       .sort((a, b) => {
-        // All-match recipes first, then by score
         if (a.allMatch !== b.allMatch) return b.allMatch - a.allMatch;
         return b.totalScore - a.totalScore;
       })
       .map(s => s.recipe);
 
-    // Attach labels (reuse already-fetched _labels)
     for (const recipe of results) {
       recipe.labels = recipe._labels || [];
       delete recipe._labels;
@@ -286,65 +274,84 @@ app.get('/api/recipes', (req, res) => {
   if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY r.created_at DESC';
 
-  const recipes = db.prepare(sql).all(...params);
+  const recipesResult = await db.execute({ sql, args: params });
+  const recipes = recipesResult.rows;
 
-  const labelStmt = db.prepare('SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?');
   for (const recipe of recipes) {
-    recipe.labels = labelStmt.all(recipe.id);
+    const labelsResult = await db.execute({
+      sql: 'SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?',
+      args: [recipe.id],
+    });
+    recipe.labels = labelsResult.rows;
   }
 
   res.json(recipes);
 });
 
-app.get('/api/recipes/:id', (req, res) => {
-  const recipe = db.prepare('SELECT * FROM recipes WHERE id = ?').get(req.params.id);
+app.get('/api/recipes/:id', async (req, res) => {
+  const result = await db.execute({
+    sql: 'SELECT * FROM recipes WHERE id = ?',
+    args: [req.params.id],
+  });
+  const recipe = result.rows[0];
   if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
 
-  recipe.labels = db.prepare('SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?').all(recipe.id);
+  const labelsResult = await db.execute({
+    sql: 'SELECT l.* FROM labels l JOIN recipe_labels rl ON l.id = rl.label_id WHERE rl.recipe_id = ?',
+    args: [recipe.id],
+  });
+  recipe.labels = labelsResult.rows;
   res.json(recipe);
 });
 
-app.post('/api/recipes', (req, res) => {
+app.post('/api/recipes', async (req, res) => {
   const { title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, label_ids, nutrition, prep_time, cook_time, servings, course, cuisine, equipment } = req.body;
 
   if (!title_he && !title_en) return res.status(400).json({ error: 'At least one title is required' });
 
-  const result = db.prepare(`
-    INSERT INTO recipes (title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, nutrition, prep_time, cook_time, servings, course, cuisine, equipment)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    title_he || '', title_en || '',
-    description_he || '', description_en || '',
-    typeof ingredients_he === 'string' ? ingredients_he : JSON.stringify(ingredients_he || []),
-    typeof ingredients_en === 'string' ? ingredients_en : JSON.stringify(ingredients_en || []),
-    instructions_he || '', instructions_en || '',
-    image_url || '',
-    tried ? 1 : 0,
-    tried && rating != null ? rating : null,
-    typeof nutrition === 'string' ? nutrition : JSON.stringify(nutrition || {}),
-    prep_time != null ? Number(prep_time) : null,
-    cook_time != null ? Number(cook_time) : null,
-    servings != null ? Number(servings) : null,
-    course || '', cuisine || '',
-    typeof equipment === 'string' ? equipment : JSON.stringify(equipment || [])
-  );
+  const result = await db.execute({
+    sql: `INSERT INTO recipes (title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, nutrition, prep_time, cook_time, servings, course, cuisine, equipment)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      title_he || '', title_en || '',
+      description_he || '', description_en || '',
+      typeof ingredients_he === 'string' ? ingredients_he : JSON.stringify(ingredients_he || []),
+      typeof ingredients_en === 'string' ? ingredients_en : JSON.stringify(ingredients_en || []),
+      instructions_he || '', instructions_en || '',
+      image_url || '',
+      tried ? 1 : 0,
+      tried && rating != null ? rating : null,
+      typeof nutrition === 'string' ? nutrition : JSON.stringify(nutrition || {}),
+      prep_time != null ? Number(prep_time) : null,
+      cook_time != null ? Number(cook_time) : null,
+      servings != null ? Number(servings) : null,
+      course || '', cuisine || '',
+      typeof equipment === 'string' ? equipment : JSON.stringify(equipment || [])
+    ],
+  });
 
-  const recipeId = result.lastInsertRowid;
+  const recipeId = Number(result.lastInsertRowid);
 
   if (label_ids && label_ids.length > 0) {
-    const insertLabel = db.prepare('INSERT INTO recipe_labels (recipe_id, label_id) VALUES (?, ?)');
     for (const lid of label_ids) {
-      insertLabel.run(recipeId, lid);
+      await db.execute({
+        sql: 'INSERT INTO recipe_labels (recipe_id, label_id) VALUES (?, ?)',
+        args: [recipeId, lid],
+      });
     }
   }
 
   res.json({ id: recipeId });
 });
 
-app.put('/api/recipes/:id', (req, res) => {
+app.put('/api/recipes/:id', async (req, res) => {
   const { title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, label_ids, nutrition, prep_time, cook_time, servings, course, cuisine, equipment } = req.body;
 
-  const existing = db.prepare('SELECT * FROM recipes WHERE id = ?').get(req.params.id);
+  const existingResult = await db.execute({
+    sql: 'SELECT * FROM recipes WHERE id = ?',
+    args: [req.params.id],
+  });
+  const existing = existingResult.rows[0];
   if (!existing) return res.status(404).json({ error: 'Recipe not found' });
 
   const ingrHe = ingredients_he !== undefined
@@ -361,37 +368,43 @@ app.put('/api/recipes/:id', (req, res) => {
     ? (typeof equipment === 'string' ? equipment : JSON.stringify(equipment))
     : existing.equipment;
 
-  db.prepare(`
-    UPDATE recipes SET
+  await db.execute({
+    sql: `UPDATE recipes SET
       title_he = ?, title_en = ?, description_he = ?, description_en = ?,
       ingredients_he = ?, ingredients_en = ?, instructions_he = ?, instructions_en = ?,
       image_url = ?, tried = ?, rating = ?,
       nutrition = ?, prep_time = ?, cook_time = ?, servings = ?, course = ?, cuisine = ?, equipment = ?
-    WHERE id = ?
-  `).run(
-    title_he ?? existing.title_he, title_en ?? existing.title_en,
-    description_he ?? existing.description_he, description_en ?? existing.description_en,
-    ingrHe, ingrEn,
-    instructions_he ?? existing.instructions_he, instructions_en ?? existing.instructions_en,
-    image_url ?? existing.image_url,
-    tried !== undefined ? (tried ? 1 : 0) : existing.tried,
-    tried && rating != null ? rating : (tried === false ? null : existing.rating),
-    nutVal,
-    prep_time !== undefined ? (prep_time != null ? Number(prep_time) : null) : existing.prep_time,
-    cook_time !== undefined ? (cook_time != null ? Number(cook_time) : null) : existing.cook_time,
-    servings !== undefined ? (servings != null ? Number(servings) : null) : existing.servings,
-    course ?? existing.course,
-    cuisine ?? existing.cuisine,
-    equipVal,
-    req.params.id
-  );
+    WHERE id = ?`,
+    args: [
+      title_he ?? existing.title_he, title_en ?? existing.title_en,
+      description_he ?? existing.description_he, description_en ?? existing.description_en,
+      ingrHe, ingrEn,
+      instructions_he ?? existing.instructions_he, instructions_en ?? existing.instructions_en,
+      image_url ?? existing.image_url,
+      tried !== undefined ? (tried ? 1 : 0) : existing.tried,
+      tried && rating != null ? rating : (tried === false ? null : existing.rating),
+      nutVal,
+      prep_time !== undefined ? (prep_time != null ? Number(prep_time) : null) : existing.prep_time,
+      cook_time !== undefined ? (cook_time != null ? Number(cook_time) : null) : existing.cook_time,
+      servings !== undefined ? (servings != null ? Number(servings) : null) : existing.servings,
+      course ?? existing.course,
+      cuisine ?? existing.cuisine,
+      equipVal,
+      req.params.id
+    ],
+  });
 
   if (label_ids !== undefined) {
-    db.prepare('DELETE FROM recipe_labels WHERE recipe_id = ?').run(req.params.id);
+    await db.execute({
+      sql: 'DELETE FROM recipe_labels WHERE recipe_id = ?',
+      args: [req.params.id],
+    });
     if (label_ids.length > 0) {
-      const insertLabel = db.prepare('INSERT INTO recipe_labels (recipe_id, label_id) VALUES (?, ?)');
       for (const lid of label_ids) {
-        insertLabel.run(req.params.id, lid);
+        await db.execute({
+          sql: 'INSERT INTO recipe_labels (recipe_id, label_id) VALUES (?, ?)',
+          args: [req.params.id, lid],
+        });
       }
     }
   }
@@ -399,12 +412,22 @@ app.put('/api/recipes/:id', (req, res) => {
   res.json({ success: true });
 });
 
-app.delete('/api/recipes/:id', (req, res) => {
-  const result = db.prepare('DELETE FROM recipes WHERE id = ?').run(req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Recipe not found' });
+app.delete('/api/recipes/:id', async (req, res) => {
+  const result = await db.execute({
+    sql: 'DELETE FROM recipes WHERE id = ?',
+    args: [req.params.id],
+  });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: 'Recipe not found' });
   res.json({ success: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`FoodDB server running at http://localhost:${PORT}`);
-});
+// Start server for local dev
+if (require.main === module) {
+  initDb().then(() => {
+    app.listen(PORT, () => {
+      console.log(`FoodDB server running at http://localhost:${PORT}`);
+    });
+  });
+}
+
+module.exports = { app, initDb };

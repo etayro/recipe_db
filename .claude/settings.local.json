@@ -6,7 +6,13 @@
       "Bash(node:*)",
       "Bash(curl:*)",
       "Bash(python3:*)",
-      "Bash(lsof:*)"
+      "Bash(lsof:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.turso.tech)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm install:*)",
+      "Bash(TURSO_DATABASE_URL=file:./fooddb.sqlite node:*)",
+      "Bash(TURSO_DATABASE_URL=file:./fooddb.sqlite timeout 5 node:*)"
     ]
   }
 }
