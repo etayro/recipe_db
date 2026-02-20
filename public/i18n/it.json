@@ -1,5 +1,5 @@
 {
-  "title": "La Cucina di Hafuchim",
+  "title": "La Cucina di Puchies",
   "searchPlaceholder": "Cerca ricette, etichette o ingredienti...",
   "recipesTitle": "Ricette",
   "triedLabel": "Mostra solo provate",
@@ -33,5 +33,23 @@
   "newLabelPlaceholder": "Nuova etichetta...",
   "metric": "Metrico",
   "imperial": "Imperiale",
-  "translating": "Traduzione in corso..."
+  "translating": "Traduzione in corso...",
+  "prepTime": "Tempo di preparazione",
+  "cookTime": "Tempo di cottura",
+  "servings": "Porzioni",
+  "course": "Portata",
+  "cuisine": "Cucina",
+  "equipment": "Attrezzatura",
+  "nutrition": "Valori nutrizionali",
+  "minutes": "min",
+  "calories": "Calorie",
+  "protein": "Proteine",
+  "carbs": "Carboidrati",
+  "fat": "Grassi",
+  "saturatedFat": "Grassi saturi",
+  "fiber": "Fibre",
+  "sugar": "Zuccheri",
+  "sodium": "Sodio",
+  "noNutritionData": "Nessun dato nutrizionale disponibile",
+  "estimatedCalories": "Calorie stimate"
 }

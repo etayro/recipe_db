@@ -3,7 +3,10 @@
     "allow": [
       "Bash(node -e:*)",
       "Bash(timeout:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(lsof:*)"
     ]
   }
 }

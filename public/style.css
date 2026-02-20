@@ -822,6 +822,203 @@ main {
   transform: translateY(-1px);
 }
 
+/* === Recipe Metadata Bar === */
+.detail-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--light-tan);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--brown);
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meta-item-label {
+  font-weight: 600;
+  color: var(--burnt-orange);
+}
+
+.meta-item-value {
+  color: var(--dark-brown);
+}
+
+/* === Equipment === */
+.detail-equipment {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 16px;
+}
+
+.detail-equipment li {
+  padding: 3px 0;
+  font-size: 0.9rem;
+}
+
+.detail-equipment li::before {
+  content: "▸ ";
+  color: var(--avocado);
+  font-weight: 700;
+}
+
+.equip-qty {
+  font-weight: 600;
+  color: var(--burnt-orange);
+}
+
+/* === Equipment Form Rows === */
+.equipment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.equipment-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.equipment-row input[type="number"] {
+  width: 60px;
+  padding: 6px 8px;
+  border: 2px solid var(--light-tan);
+  border-radius: var(--radius-sm);
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.85rem;
+  background: var(--cream);
+  color: var(--dark-brown);
+  outline: none;
+}
+
+.equipment-row input[type="text"] {
+  flex: 1;
+  padding: 6px 8px;
+  border: 2px solid var(--light-tan);
+  border-radius: var(--radius-sm);
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.85rem;
+  background: var(--cream);
+  color: var(--dark-brown);
+  outline: none;
+}
+
+.equipment-row .remove-equip {
+  background: none;
+  border: none;
+  color: #c0392b;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+/* === Nutrition Section === */
+.nutrition-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 2px dashed var(--light-tan);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  color: var(--brown);
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  text-align: start;
+  transition: all 0.2s;
+}
+
+.nutrition-toggle:hover {
+  border-color: var(--mustard);
+  color: var(--mustard);
+}
+
+.nutrition-chevron {
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.nutrition-toggle.open .nutrition-chevron {
+  transform: rotate(180deg);
+}
+
+.nutrition-fields.hidden {
+  display: none;
+}
+
+.nutrition-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.nutrition-grid .form-group {
+  margin-bottom: 0;
+}
+
+.nutrition-grid input {
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.nutrition-grid label {
+  font-size: 0.75rem;
+}
+
+/* === Nutrition Detail Display === */
+.nutrition-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 10px;
+  background: var(--cream);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--light-tan);
+}
+
+.nutrition-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.nutrition-item-label {
+  color: var(--brown);
+  font-weight: 500;
+}
+
+.nutrition-item-value {
+  font-weight: 700;
+  color: var(--burnt-orange);
+}
+
+.nutrition-item.highlight {
+  background: var(--light-tan);
+}
+
+/* === 3 Column Form Row === */
+.form-row-3col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 /* === Empty State === */
 .empty-state {
   text-align: center;

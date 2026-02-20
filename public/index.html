@@ -97,6 +97,59 @@
             <label id="labelInstructions">הוראות הכנה <span class="required-mark">*</span></label>
             <textarea id="formInstructions" rows="5"></textarea>
           </div>
+
+          <!-- Metadata -->
+          <div class="form-row">
+            <div class="form-group">
+              <label id="labelCourse">Course</label>
+              <input type="text" id="formCourse">
+            </div>
+            <div class="form-group">
+              <label id="labelCuisine">Cuisine</label>
+              <input type="text" id="formCuisine">
+            </div>
+          </div>
+          <div class="form-row form-row-3col">
+            <div class="form-group">
+              <label id="labelPrepTime">Prep time (min)</label>
+              <input type="number" id="formPrepTime" min="0">
+            </div>
+            <div class="form-group">
+              <label id="labelCookTime">Cook time (min)</label>
+              <input type="number" id="formCookTime" min="0">
+            </div>
+            <div class="form-group">
+              <label id="labelServings">Servings</label>
+              <input type="number" id="formServings" min="1">
+            </div>
+          </div>
+
+          <!-- Equipment -->
+          <div class="form-group">
+            <label id="labelEquipment">Equipment</label>
+            <div class="equipment-list" id="equipmentList"></div>
+            <button type="button" class="add-ingredient-btn" id="addEquipmentBtn">+ Equipment</button>
+          </div>
+
+          <!-- Nutrition (collapsible) -->
+          <div class="form-group">
+            <button type="button" class="nutrition-toggle" id="nutritionToggle">
+              <span id="labelNutrition">Nutrition</span>
+              <span class="nutrition-chevron" id="nutritionChevron">&#9660;</span>
+            </button>
+            <div class="nutrition-fields hidden" id="nutritionFields">
+              <div class="nutrition-grid">
+                <div class="form-group"><label>Calories</label><input type="text" id="nutCalories" placeholder="e.g. 369kcal"></div>
+                <div class="form-group"><label>Protein</label><input type="text" id="nutProtein" placeholder="e.g. 7g"></div>
+                <div class="form-group"><label>Carbs</label><input type="text" id="nutCarbs" placeholder="e.g. 27g"></div>
+                <div class="form-group"><label>Fat</label><input type="text" id="nutFat" placeholder="e.g. 28g"></div>
+                <div class="form-group"><label>Saturated Fat</label><input type="text" id="nutSatFat" placeholder="e.g. 4g"></div>
+                <div class="form-group"><label>Fiber</label><input type="text" id="nutFiber" placeholder="e.g. 6g"></div>
+                <div class="form-group"><label>Sugar</label><input type="text" id="nutSugar" placeholder="e.g. 4g"></div>
+                <div class="form-group"><label>Sodium</label><input type="text" id="nutSodium" placeholder="e.g. 627mg"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Shared fields (both tabs) -->

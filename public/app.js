@@ -8,6 +8,7 @@ let triedOnly = true;
 let searchTimeout = null;
 let currentTab = 'freetext';
 let formIngredients = [];
+let formEquipment = [];
 let detailUnitSystem = 'metric'; // 'metric' or 'imperial'
 let currentDetailRecipe = null;
 
@@ -40,7 +41,6 @@ async function loadTranslations(langCode) {
     translationsCache[langCode] = data;
     currentTranslations = data;
   } catch {
-    // Fallback to English
     if (langCode !== 'en') await loadTranslations('en');
   }
 }
@@ -49,16 +49,24 @@ function t(key) {
   return currentTranslations[key] || key;
 }
 
+// === Cookie helpers ===
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function setCookie(name, value, days) {
+  const maxAge = days * 86400;
+  document.cookie = name + '=' + encodeURIComponent(value) + ';path=/;max-age=' + maxAge;
+}
+
 // === On-the-fly recipe translation cache ===
-// Key: `${recipeId}_${field}_${lang}`, Value: translated string
 const recipeTranslationCache = {};
 
 async function getRecipeField(recipe, prop) {
-  // HE and EN are stored in DB directly
   if (lang === 'he' || lang === 'en') {
     return recipe[`${prop}_${lang}`] || recipe[`${prop}_he`] || '';
   }
-  // For other languages, translate from EN on the fly
   const enValue = recipe[`${prop}_en`] || recipe[`${prop}_he`] || '';
   if (!enValue) return '';
 
@@ -70,14 +78,12 @@ async function getRecipeField(recipe, prop) {
   return translated;
 }
 
-// Sync version for cards (uses cached or falls back to EN)
 function recipePropSync(recipe, prop) {
   if (lang === 'he' || lang === 'en') {
     return recipe[`${prop}_${lang}`] || recipe[`${prop}_he`] || '';
   }
   const cacheKey = `${recipe.id}_${prop}_${lang}`;
   if (recipeTranslationCache[cacheKey]) return recipeTranslationCache[cacheKey];
-  // Fallback to English while async translation loads
   return recipe[`${prop}_en`] || recipe[`${prop}_he`] || '';
 }
 
@@ -125,13 +131,60 @@ function labelDisplay(label) {
 function labelName(label) {
   if (lang === 'he') return label.name_he;
   if (lang === 'en') return label.name_en;
-  // For other languages, return EN (labels are short, no on-the-fly translate)
   return label.name_en;
 }
 
 function formatRating(rating) {
   if (rating == null) return '';
   return rating % 1 === 0 ? String(Math.round(rating)) : String(rating);
+}
+
+// === Calorie Estimation ===
+const CALORIE_TABLE = {
+  flour: 364, sugar: 387, butter: 717, oil: 884, 'olive oil': 884, egg: 155, eggs: 155,
+  milk: 42, cream: 340, 'heavy cream': 340, 'sour cream': 193, cheese: 402,
+  'cream cheese': 342, rice: 130, pasta: 131, bread: 265, chicken: 239,
+  beef: 250, pork: 242, salmon: 208, fish: 206, shrimp: 99, tofu: 76,
+  potato: 77, potatoes: 77, tomato: 18, tomatoes: 18, onion: 40, onions: 40,
+  garlic: 149, carrot: 41, carrots: 41, broccoli: 34, spinach: 23,
+  avocado: 160, banana: 89, apple: 52, lemon: 29, honey: 304,
+  chocolate: 546, cocoa: 228, 'cocoa powder': 228, nuts: 607, almonds: 579,
+  walnuts: 654, peanuts: 567, 'peanut butter': 588, coconut: 354,
+  'coconut milk': 230, 'coconut oil': 862, soy: 446, 'soy sauce': 53,
+  vinegar: 18, mayonnaise: 680, ketchup: 112, mustard: 66,
+  'קמח': 364, 'סוכר': 387, 'חמאה': 717, 'שמן': 884, 'ביצה': 155, 'ביצים': 155,
+  'חלב': 42, 'שמנת': 340, 'גבינה': 402, 'אורז': 130, 'פסטה': 131,
+  'עוף': 239, 'בקר': 250, 'סלמון': 208, 'דג': 206, 'טופו': 76,
+  'תפוח אדמה': 77, 'עגבניה': 18, 'בצל': 40, 'שום': 149, 'גזר': 41,
+  'אבוקדו': 160, 'בננה': 89, 'דבש': 304, 'שוקולד': 546,
+};
+
+function estimateCalories(ingredients) {
+  let total = 0;
+  let matched = 0;
+  for (const ingr of ingredients) {
+    const name = (ingr.name || '').toLowerCase().trim();
+    let cal = null;
+    for (const [key, kcal] of Object.entries(CALORIE_TABLE)) {
+      if (name.includes(key)) { cal = kcal; break; }
+    }
+    if (cal == null) continue;
+    matched++;
+    let grams = 100;
+    const qty = ingr.qty || 1;
+    const unit = (ingr.unit || '').toLowerCase();
+    if (unit === 'g') grams = qty;
+    else if (unit === 'kg') grams = qty * 1000;
+    else if (unit === 'ml' || unit === 'l') grams = unit === 'l' ? qty * 1000 : qty;
+    else if (unit === 'cup') grams = qty * 240;
+    else if (unit === 'tbsp') grams = qty * 15;
+    else if (unit === 'tsp') grams = qty * 5;
+    else if (unit === 'pcs') grams = qty * 100;
+    else grams = qty * 100;
+    total += (cal / 100) * grams;
+  }
+  if (matched === 0) return null;
+  return Math.round(total);
 }
 
 // === API ===
@@ -172,26 +225,22 @@ function parseSearch(text) {
   const detectedLabelIds = [];
   let remaining = text;
 
-  // Sort labels by name length descending (greedy match longest first)
   const sortedLabels = [...labels].sort((a, b) => {
     const aLen = Math.max(a.name_he.length, a.name_en.length);
     const bLen = Math.max(b.name_he.length, b.name_en.length);
     return bLen - aLen;
   });
 
-  // Try to match multi-word label names in the search text
   for (const label of sortedLabels) {
     const nameHe = label.name_he;
     const nameEn = label.name_en.toLowerCase();
 
-    // Check Hebrew name
     if (remaining.includes(nameHe)) {
       detectedLabelIds.push(label.id);
       remaining = remaining.replace(nameHe, ' ').trim();
       continue;
     }
 
-    // Check English name (case-insensitive)
     const lowerRemaining = remaining.toLowerCase();
     const idx = lowerRemaining.indexOf(nameEn);
     if (idx !== -1) {
@@ -201,9 +250,7 @@ function parseSearch(text) {
     }
   }
 
-  // Tokenize whatever is left
   const remainingTerms = remaining.split(/[\s,،]+/).map(t => t.trim()).filter(Boolean);
-
   return { detectedLabelIds, remainingTerms };
 }
 
@@ -225,11 +272,8 @@ async function translateText(text, from, to) {
 
 // === Language Detection ===
 function detectInputLang(text) {
-  // Check for Hebrew characters
   if (/[\u0590-\u05FF]/.test(text)) return 'he';
-  // Check for Russian/Cyrillic
   if (/[\u0400-\u04FF]/.test(text)) return 'ru';
-  // Default to current lang if it uses Latin script, otherwise English
   if (['en', 'it', 'de', 'nl'].includes(lang)) return lang;
   return 'en';
 }
@@ -241,13 +285,41 @@ function parseFreeText(text) {
   let description = '';
   let ingredients = [];
   let instructions = '';
+  let nutrition = {};
+  let equipment = [];
+  let prepTime = null;
+  let cookTime = null;
+  let servings = null;
+  let course = '';
+  let cuisine = '';
 
   const ingrHeaders = /^(ingredients|מרכיבים|חומרים|רכיבים|ingredienti|zutaten|ingrediënten|ингредиенты)\s*:?\s*$/i;
   const instrHeaders = /^(instructions|הוראות|אופן ההכנה|הכנה|directions|steps|שלבי הכנה|method|preparation|istruzioni|anleitung|zubereitung|instructies|bereiding|инструкции|приготовление)\s*:?\s*$/i;
+  const nutritionHeaders = /^(nutrition|nutritional?\s*info|nutritional?\s*facts|ערכים תזונתיים|תזונה|nährwerte|voedingswaarden|valori nutrizionali|пищевая ценность)\s*:?\s*$/i;
+  const equipmentHeaders = /^(equipment|tools|כלים|ציוד|ausstattung|benodigdheden|attrezzatura|оборудование)\s*:?\s*$/i;
 
-  // Detect if a line looks like an ingredient (has quantity/unit/bullet)
   const looksLikeIngredient = (line) => {
     return /^[\d½¼¾⅓⅔⅛]/.test(line) || /^[\-–•·*]\s*\d/.test(line) || /^[\-–•·*]\s+/.test(line);
+  };
+
+  // Pre-scan for metadata lines
+  const metaPatterns = {
+    prepTime: /^(?:prep(?:aration)?\s*time|זמן הכנה|vorbereitungszeit|voorbereidingstijd|tempo di preparazione|время подготовки)\s*[:：]\s*(\d+)\s*(?:min|minutes|דקות|мин)?/i,
+    cookTime: /^(?:cook(?:ing)?\s*time|זמן בישול|kochzeit|kooktijd|tempo di cottura|время приготовления)\s*[:：]\s*(\d+)\s*(?:min|minutes|דקות|мин)?/i,
+    servings: /^(?:servings?|yield|מנות|portionen|porties|porzioni|порции)\s*[:：]\s*(\d+)/i,
+    course: /^(?:course|category|קטגוריה|gang|categorie|portata|блюдо)\s*[:：]\s*(.+)/i,
+    cuisine: /^(?:cuisine|מטבח|küche|keuken|cucina|кухня)\s*[:：]\s*(.+)/i,
+  };
+
+  const nutritionPatterns = {
+    calories: /^(?:calories|קלוריות|kalorien|calorieën|calorie|калории)\s*[:：]\s*(.+)/i,
+    protein: /^(?:protein|חלבון|eiweiß|eiwitten|proteine|белки)\s*[:：]\s*(.+)/i,
+    carbs: /^(?:carb(?:ohydrate)?s?|פחמימות|kohlenhydrate|koolhydraten|carboidrati|углеводы)\s*[:：]\s*(.+)/i,
+    fat: /^(?:(?:total\s+)?fat|שומן|fett|vet|grassi|жиры)\s*[:：]\s*(.+)/i,
+    saturatedFat: /^(?:saturated\s+fat|שומן רווי|gesättigtes fett|verzadigd vet|grassi saturi|насыщенные жиры)\s*[:：]\s*(.+)/i,
+    fiber: /^(?:fiber|fibre|סיבים|ballaststoffe|vezels|fibra|клетчатка)\s*[:：]\s*(.+)/i,
+    sugar: /^(?:sugar|סוכר|zucker|suiker|zucchero|сахар)\s*[:：]\s*(.+)/i,
+    sodium: /^(?:sodium|נתרן|natrium|sodio|натрий)\s*[:：]\s*(.+)/i,
   };
 
   let section = 'title';
@@ -256,9 +328,7 @@ function parseFreeText(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) {
-      // Blank line after ingredients could signal instructions
       if (section === 'ingredients' && ingredients.length > 0) {
-        // Look ahead: if next non-empty line doesn't look like an ingredient, switch to instructions
         const nextNonEmpty = lines.slice(i + 1).find(l => l.trim());
         if (nextNonEmpty && !looksLikeIngredient(nextNonEmpty) && !ingrHeaders.test(nextNonEmpty)) {
           section = 'instructions';
@@ -267,39 +337,71 @@ function parseFreeText(text) {
       continue;
     }
 
-    // Check for section headers
-    if (ingrHeaders.test(line)) {
-      section = 'ingredients';
-      continue;
+    // Check metadata patterns anywhere
+    let metaMatched = false;
+    for (const [key, pattern] of Object.entries(metaPatterns)) {
+      const m = line.match(pattern);
+      if (m) {
+        if (key === 'prepTime') prepTime = parseInt(m[1]);
+        else if (key === 'cookTime') cookTime = parseInt(m[1]);
+        else if (key === 'servings') servings = parseInt(m[1]);
+        else if (key === 'course') course = m[1].trim();
+        else if (key === 'cuisine') cuisine = m[1].trim();
+        metaMatched = true;
+        break;
+      }
     }
-    if (instrHeaders.test(line)) {
-      section = 'instructions';
-      continue;
+    if (metaMatched) continue;
+
+    // Check nutrition patterns
+    if (section === 'nutrition') {
+      let nutMatched = false;
+      for (const [key, pattern] of Object.entries(nutritionPatterns)) {
+        const m = line.match(pattern);
+        if (m) {
+          nutrition[key] = m[1].trim();
+          nutMatched = true;
+          break;
+        }
+      }
+      if (nutMatched) continue;
+      // If no nutrition pattern matched and line isn't empty, switch section
+      if (!nutritionHeaders.test(line)) {
+        section = 'instructions';
+      }
     }
 
+    // Check for section headers
+    if (ingrHeaders.test(line)) { section = 'ingredients'; continue; }
+    if (instrHeaders.test(line)) { section = 'instructions'; continue; }
+    if (nutritionHeaders.test(line)) { section = 'nutrition'; continue; }
+    if (equipmentHeaders.test(line)) { section = 'equipment'; continue; }
+
     if (!foundTitle) {
-      // First line is title if it's short and doesn't have quantities
       if (line.length < 100 && !looksLikeIngredient(line)) {
-        title = line.replace(/^#+\s*/, ''); // Strip markdown headings
+        title = line.replace(/^#+\s*/, '');
         foundTitle = true;
         section = 'description';
         continue;
       } else {
-        // First line looks like an ingredient, skip title
         foundTitle = true;
         section = 'ingredients';
       }
     }
 
     if (section === 'description') {
-      // If this line looks like an ingredient, transition
       if (looksLikeIngredient(line)) {
         section = 'ingredients';
       }
     }
 
+    if (section === 'equipment') {
+      const cleaned = line.replace(/^[\-–•·*]\s*/, '').replace(/^\d+[.)]\s*/, '').trim();
+      if (cleaned) equipment.push({ qty: 1, name: cleaned });
+      continue;
+    }
+
     if (section === 'ingredients') {
-      // If line looks like a numbered instruction step (not an ingredient), switch
       if (/^(שלב|step)\s*\d/i.test(line) || (/^\d+[.)]\s/.test(line) && !looksLikeIngredient(line) && line.length > 60)) {
         section = 'instructions';
         instructions += line + '\n';
@@ -314,16 +416,13 @@ function parseFreeText(text) {
     }
   }
 
-  // If no title was found, generate from first ingredient or content
   if (!title && ingredients.length > 0) {
     title = ingredients[0].name || 'Recipe';
   }
 
   return {
-    title,
-    description,
-    ingredients,
-    instructions: instructions.trim(),
+    title, description, ingredients, instructions: instructions.trim(),
+    nutrition, equipment, prepTime, cookTime, servings, course, cuisine,
   };
 }
 
@@ -427,23 +526,6 @@ function renderRecipes() {
   container.querySelectorAll('.recipe-card').forEach(el => {
     el.addEventListener('click', () => showDetail(Number(el.dataset.id)));
   });
-
-  // For non-HE/EN, trigger async translation of card titles
-  if (lang !== 'he' && lang !== 'en') {
-    translateRecipeCards();
-  }
-}
-
-async function translateRecipeCards() {
-  const cards = document.querySelectorAll('.recipe-card');
-  for (const card of cards) {
-    const id = Number(card.dataset.id);
-    const recipe = recipes.find(r => r.id === id);
-    if (!recipe) continue;
-    const translated = await getRecipeField(recipe, 'title');
-    const titleEl = card.querySelector('.recipe-card-title');
-    if (titleEl) titleEl.textContent = translated;
-  }
 }
 
 async function showDetail(id) {
@@ -460,14 +542,12 @@ async function renderDetailContent() {
 
   const content = document.getElementById('detailContent');
 
-  // Get translated fields
   const titleText = await getRecipeField(recipe, 'title');
   const descText = await getRecipeField(recipe, 'description');
   const instrText = await getRecipeField(recipe, 'instructions');
 
   const hasImage = recipe.image_url && recipe.image_url.trim();
 
-  // For ingredients, use stored JSON for HE/EN, translate for others
   let ingredientsRaw;
   if (lang === 'he' || lang === 'en') {
     ingredientsRaw = recipe[`ingredients_${lang}`] || recipe.ingredients_he;
@@ -476,7 +556,6 @@ async function renderDetailContent() {
   }
   const ingredients = parseIngredients(ingredientsRaw);
 
-  // Translate ingredient names for non-HE/EN
   if (lang !== 'he' && lang !== 'en') {
     for (let i = 0; i < ingredients.length; i++) {
       const cacheKey = `${recipe.id}_ingr_${i}_${lang}`;
@@ -490,10 +569,64 @@ async function renderDetailContent() {
     }
   }
 
+  // Parse nutrition & equipment
+  let nutrition = {};
+  try { nutrition = JSON.parse(recipe.nutrition || '{}'); } catch {}
+  let equipmentArr = [];
+  try { equipmentArr = JSON.parse(recipe.equipment || '[]'); } catch {}
+
+  // Estimate calories if missing
+  let estimatedCal = null;
+  if (!nutrition.calories) {
+    estimatedCal = estimateCalories(ingredients);
+  }
+
+  // Build metadata bar
+  const metaItems = [];
+  if (recipe.course) metaItems.push(`<div class="meta-item"><span class="meta-item-label">${t('course')}</span><span class="meta-item-value">${recipe.course}</span></div>`);
+  if (recipe.cuisine) metaItems.push(`<div class="meta-item"><span class="meta-item-label">${t('cuisine')}</span><span class="meta-item-value">${recipe.cuisine}</span></div>`);
+  if (recipe.prep_time) metaItems.push(`<div class="meta-item"><span class="meta-item-label">${t('prepTime')}</span><span class="meta-item-value">${recipe.prep_time} ${t('minutes')}</span></div>`);
+  if (recipe.cook_time) metaItems.push(`<div class="meta-item"><span class="meta-item-label">${t('cookTime')}</span><span class="meta-item-value">${recipe.cook_time} ${t('minutes')}</span></div>`);
+  if (recipe.servings) metaItems.push(`<div class="meta-item"><span class="meta-item-label">${t('servings')}</span><span class="meta-item-value">${recipe.servings}</span></div>`);
+  const metadataHtml = metaItems.length > 0 ? `<div class="detail-metadata">${metaItems.join('')}</div>` : '';
+
+  // Build equipment section
+  let equipmentHtml = '';
+  if (equipmentArr.length > 0) {
+    equipmentHtml = `
+      <h3 class="detail-section-title">${t('equipment')}</h3>
+      <ul class="detail-equipment">
+        ${equipmentArr.map(eq => `<li>${eq.qty > 1 ? `<span class="equip-qty">${eq.qty}x</span> ` : ''}${eq.name}</li>`).join('')}
+      </ul>
+    `;
+  }
+
+  // Build nutrition section
+  let nutritionHtml = '';
+  const nutKeys = ['calories', 'protein', 'carbs', 'fat', 'saturatedFat', 'fiber', 'sugar', 'sodium'];
+  const hasNutrition = nutKeys.some(k => nutrition[k]);
+  if (hasNutrition || estimatedCal) {
+    let items = '';
+    if (hasNutrition) {
+      for (const k of nutKeys) {
+        if (nutrition[k]) {
+          items += `<div class="nutrition-item"><span class="nutrition-item-label">${t(k)}</span><span class="nutrition-item-value">${nutrition[k]}</span></div>`;
+        }
+      }
+    } else if (estimatedCal) {
+      items = `<div class="nutrition-item"><span class="nutrition-item-label">${t('estimatedCalories')}</span><span class="nutrition-item-value">~${estimatedCal} kcal</span></div>`;
+    }
+    nutritionHtml = `
+      <h3 class="detail-section-title">${t('nutrition')}</h3>
+      <div class="nutrition-detail">${items}</div>
+    `;
+  }
+
   content.innerHTML = `
     <div class="detail-title">${titleText}</div>
     ${hasImage ? `<img class="detail-image" src="${recipe.image_url}" alt="${titleText}">` : ''}
     ${descText ? `<p class="detail-description">${descText}</p>` : ''}
+    ${metadataHtml}
     <div class="detail-labels">
       ${(recipe.labels || []).map(l => `<span class="label-chip">${labelDisplay(l)}</span>`).join('')}
     </div>
@@ -518,6 +651,8 @@ async function renderDetailContent() {
     </ul>
     <h3 class="detail-section-title">${t('instructions')}</h3>
     <div class="detail-instructions">${instrText}</div>
+    ${equipmentHtml}
+    ${nutritionHtml}
     <div class="detail-actions">
       <button class="btn-edit" onclick="openEditForm(${recipe.id})">${t('edit')}</button>
       <button class="btn-delete" onclick="deleteRecipe(${recipe.id})">${t('delete')}</button>
@@ -593,7 +728,43 @@ function renderIngredientRows() {
   });
 }
 
-function openAddForm() {
+// Equipment form rows
+function addEquipmentRow(eq) {
+  formEquipment.push(eq || { qty: 1, name: '' });
+  renderEquipmentRows();
+}
+
+function removeEquipmentRow(idx) {
+  formEquipment.splice(idx, 1);
+  renderEquipmentRows();
+}
+
+function renderEquipmentRows() {
+  const container = document.getElementById('equipmentList');
+  container.innerHTML = formEquipment.map((eq, idx) => `
+    <div class="equipment-row" data-idx="${idx}">
+      <input type="number" value="${eq.qty || 1}" min="1" data-field="qty" style="width:60px">
+      <input type="text" value="${eq.name}" placeholder="${t('equipment')}" data-field="name">
+      <button type="button" class="remove-ingr" onclick="removeEquipmentRow(${idx})">&times;</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.equipment-row').forEach(row => {
+    const idx = Number(row.dataset.idx);
+    row.querySelectorAll('[data-field]').forEach(input => {
+      input.addEventListener('input', () => {
+        const field = input.dataset.field;
+        formEquipment[idx][field] = field === 'qty' ? (parseInt(input.value) || 1) : input.value;
+      });
+      input.addEventListener('change', () => {
+        const field = input.dataset.field;
+        formEquipment[idx][field] = field === 'qty' ? (parseInt(input.value) || 1) : input.value;
+      });
+    });
+  });
+}
+
+function clearFormFields() {
   document.getElementById('formRecipeId').value = '';
   document.getElementById('formFreetext').value = '';
   document.getElementById('formTitle_input').value = '';
@@ -602,10 +773,28 @@ function openAddForm() {
   document.getElementById('formImageUrl').value = '';
   document.getElementById('formTried').checked = false;
   document.getElementById('formRating').value = '';
-  document.getElementById('formTitle').textContent = t('formTitleNew');
+  document.getElementById('formCourse').value = '';
+  document.getElementById('formCuisine').value = '';
+  document.getElementById('formPrepTime').value = '';
+  document.getElementById('formCookTime').value = '';
+  document.getElementById('formServings').value = '';
   document.getElementById('imagePreview').classList.add('hidden');
+  // Clear nutrition fields
+  ['nutCalories', 'nutProtein', 'nutCarbs', 'nutFat', 'nutSatFat', 'nutFiber', 'nutSugar', 'nutSodium'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  // Collapse nutrition
+  document.getElementById('nutritionFields').classList.add('hidden');
+  document.getElementById('nutritionChevron').style.transform = '';
+}
+
+function openAddForm() {
+  clearFormFields();
+  document.getElementById('formTitle').textContent = t('formTitleNew');
   formIngredients = [];
   renderIngredientRows();
+  formEquipment = [];
+  renderEquipmentRows();
   selectedFormLabels = new Set();
   renderFormLabels();
   updateRatingState();
@@ -618,10 +807,9 @@ async function openEditForm(id) {
   const res = await fetch(`/api/recipes/${id}`);
   const recipe = await res.json();
 
+  clearFormFields();
   document.getElementById('formRecipeId').value = recipe.id;
-  document.getElementById('formFreetext').value = '';
 
-  // Fill manual fields — use HE/EN directly, for other languages translate
   let titleVal, descVal, instrVal, ingrRaw;
   if (lang === 'he' || lang === 'en') {
     titleVal = recipe[`title_${lang}`] || '';
@@ -639,20 +827,40 @@ async function openEditForm(id) {
   document.getElementById('formDesc').value = descVal;
   document.getElementById('formInstructions').value = instrVal;
   document.getElementById('formImageUrl').value = recipe.image_url || '';
+  document.getElementById('formCourse').value = recipe.course || '';
+  document.getElementById('formCuisine').value = recipe.cuisine || '';
+  document.getElementById('formPrepTime').value = recipe.prep_time || '';
+  document.getElementById('formCookTime').value = recipe.cook_time || '';
+  document.getElementById('formServings').value = recipe.servings || '';
 
   if (recipe.image_url) {
     document.getElementById('previewImg').src = recipe.image_url;
     document.getElementById('imagePreview').classList.remove('hidden');
-  } else {
-    document.getElementById('imagePreview').classList.add('hidden');
   }
+
+  // Nutrition
+  let nutrition = {};
+  try { nutrition = JSON.parse(recipe.nutrition || '{}'); } catch {}
+  document.getElementById('nutCalories').value = nutrition.calories || '';
+  document.getElementById('nutProtein').value = nutrition.protein || '';
+  document.getElementById('nutCarbs').value = nutrition.carbs || '';
+  document.getElementById('nutFat').value = nutrition.fat || '';
+  document.getElementById('nutSatFat').value = nutrition.saturatedFat || '';
+  document.getElementById('nutFiber').value = nutrition.fiber || '';
+  document.getElementById('nutSugar').value = nutrition.sugar || '';
+  document.getElementById('nutSodium').value = nutrition.sodium || '';
+
+  // Equipment
+  let equipmentArr = [];
+  try { equipmentArr = JSON.parse(recipe.equipment || '[]'); } catch {}
+  formEquipment = equipmentArr.length > 0 ? equipmentArr : [];
+  renderEquipmentRows();
 
   document.getElementById('formTried').checked = !!recipe.tried;
   document.getElementById('formRating').value = recipe.rating != null ? recipe.rating : '';
   document.getElementById('formTitle').textContent = t('formTitleEdit');
 
   formIngredients = parseIngredients(ingrRaw);
-  // Translate ingredient names for non-HE/EN
   if (lang !== 'he' && lang !== 'en') {
     for (let i = 0; i < formIngredients.length; i++) {
       formIngredients[i].name = await translateText(formIngredients[i].name, 'en', lang);
@@ -698,6 +906,24 @@ function updateRatingState() {
   }
 }
 
+function gatherNutrition() {
+  const obj = {};
+  const fields = [
+    ['nutCalories', 'calories'], ['nutProtein', 'protein'], ['nutCarbs', 'carbs'],
+    ['nutFat', 'fat'], ['nutSatFat', 'saturatedFat'], ['nutFiber', 'fiber'],
+    ['nutSugar', 'sugar'], ['nutSodium', 'sodium'],
+  ];
+  for (const [elId, key] of fields) {
+    const val = document.getElementById(elId).value.trim();
+    if (val) obj[key] = val;
+  }
+  return obj;
+}
+
+function gatherEquipment() {
+  return formEquipment.filter(eq => eq.name.trim()).map(eq => ({ qty: eq.qty || 1, name: eq.name.trim() }));
+}
+
 async function handleFormSubmit(e) {
   e.preventDefault();
 
@@ -707,6 +933,9 @@ async function handleFormSubmit(e) {
   const imageUrl = document.getElementById('formImageUrl').value;
 
   let title, description, ingredients, instructions;
+  let parsedNutrition = {}, parsedEquipment = [];
+  let parsedPrepTime = null, parsedCookTime = null, parsedServings = null;
+  let parsedCourse = '', parsedCuisine = '';
 
   if (currentTab === 'freetext') {
     const freetext = document.getElementById('formFreetext').value.trim();
@@ -719,11 +948,31 @@ async function handleFormSubmit(e) {
     description = parsed.description;
     ingredients = parsed.ingredients;
     instructions = parsed.instructions;
+    parsedNutrition = parsed.nutrition || {};
+    parsedEquipment = parsed.equipment || [];
+    parsedPrepTime = parsed.prepTime;
+    parsedCookTime = parsed.cookTime;
+    parsedServings = parsed.servings;
+    parsedCourse = parsed.course || '';
+    parsedCuisine = parsed.cuisine || '';
+
+    // Validate: must have at least title or ingredients
+    if (!title && ingredients.length === 0) {
+      alert('Could not parse recipe. Please check the format.');
+      return;
+    }
   } else {
     title = document.getElementById('formTitle_input').value.trim();
     description = document.getElementById('formDesc').value.trim();
     instructions = document.getElementById('formInstructions').value.trim();
     ingredients = formIngredients.filter(i => i.name.trim());
+    parsedNutrition = gatherNutrition();
+    parsedEquipment = gatherEquipment();
+    parsedPrepTime = parseInt(document.getElementById('formPrepTime').value) || null;
+    parsedCookTime = parseInt(document.getElementById('formCookTime').value) || null;
+    parsedServings = parseInt(document.getElementById('formServings').value) || null;
+    parsedCourse = document.getElementById('formCourse').value.trim();
+    parsedCuisine = document.getElementById('formCuisine').value.trim();
 
     if (!title) {
       alert(t('titleLabel'));
@@ -745,10 +994,8 @@ async function handleFormSubmit(e) {
   submitBtn.disabled = true;
 
   try {
-    // Detect the language of the input text
     const inputLang = detectInputLang(title + ' ' + instructions);
 
-    // We need to produce HE and EN versions for the DB
     let titleHe, titleEn, descHe, descEn, instrHe, instrEn, ingrHe, ingrEn;
 
     if (inputLang === 'he') {
@@ -756,7 +1003,6 @@ async function handleFormSubmit(e) {
       descHe = description;
       instrHe = instructions;
       ingrHe = ingredients;
-      // Translate to EN
       [titleEn, descEn, instrEn] = await Promise.all([
         translateText(title, 'he', 'en'),
         description ? translateText(description, 'he', 'en') : Promise.resolve(''),
@@ -770,7 +1016,6 @@ async function handleFormSubmit(e) {
       descEn = description;
       instrEn = instructions;
       ingrEn = ingredients;
-      // Translate to HE
       [titleHe, descHe, instrHe] = await Promise.all([
         translateText(title, 'en', 'he'),
         description ? translateText(description, 'en', 'he') : Promise.resolve(''),
@@ -780,8 +1025,6 @@ async function handleFormSubmit(e) {
         ...ingr, name: await translateText(ingr.name, 'en', 'he')
       })));
     } else {
-      // Input is in another language (it, ru, de, nl)
-      // Translate to both EN and HE
       [titleEn, descEn, instrEn] = await Promise.all([
         translateText(title, inputLang, 'en'),
         description ? translateText(description, inputLang, 'en') : Promise.resolve(''),
@@ -813,16 +1056,33 @@ async function handleFormSubmit(e) {
       tried,
       rating: tried && ratingVal ? Number(ratingVal) : null,
       label_ids: [...selectedFormLabels],
+      nutrition: JSON.stringify(parsedNutrition),
+      equipment: JSON.stringify(parsedEquipment),
+      prep_time: parsedPrepTime,
+      cook_time: parsedCookTime,
+      servings: parsedServings,
+      course: parsedCourse,
+      cuisine: parsedCuisine,
     };
 
+    let apiRes;
     if (id) {
-      await fetch(`/api/recipes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      apiRes = await fetch(`/api/recipes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } else {
-      await fetch('/api/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      apiRes = await fetch('/api/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    }
+
+    if (!apiRes.ok) {
+      const errData = await apiRes.json().catch(() => ({}));
+      alert(errData.error || 'Failed to save recipe');
+      return;
     }
 
     document.getElementById('formModal').classList.add('hidden');
     await loadAndRender();
+  } catch (err) {
+    console.error('Save error:', err);
+    alert('Error saving recipe: ' + err.message);
   } finally {
     submitBtn.textContent = originalText;
     submitBtn.disabled = false;
@@ -841,7 +1101,6 @@ async function addNewLabel() {
   const name = input.value.trim();
   if (!name) return;
 
-  // Detect input language and translate to HE and EN
   const inputLang = detectInputLang(name);
   let nameHe, nameEn;
 
@@ -891,12 +1150,19 @@ async function handleImageUpload(file) {
 // === Language ===
 async function changeLanguage(newLang) {
   lang = newLang;
+  setCookie('lang', lang, 365);
   const dir = getLangDir(lang);
   document.documentElement.setAttribute('dir', dir);
   document.documentElement.setAttribute('lang', lang);
   await loadTranslations(lang);
   updateUIText();
   renderFilterLabels();
+
+  // Pre-translate all recipe titles BEFORE rendering cards
+  if (lang !== 'he' && lang !== 'en') {
+    await Promise.all(recipes.map(r => getRecipeField(r, 'title')));
+  }
+
   renderRecipes();
 }
 
@@ -923,18 +1189,44 @@ function updateUIText() {
   document.getElementById('formSubmitBtn').textContent = t('save');
   document.getElementById('addIngredientBtn').textContent = t('addIngredient');
   document.getElementById('newLabelInput').placeholder = t('newLabelPlaceholder');
+  // New fields
+  document.getElementById('labelCourse').textContent = t('course');
+  document.getElementById('labelCuisine').textContent = t('cuisine');
+  document.getElementById('labelPrepTime').textContent = t('prepTime') + ' (' + t('minutes') + ')';
+  document.getElementById('labelCookTime').textContent = t('cookTime') + ' (' + t('minutes') + ')';
+  document.getElementById('labelServings').textContent = t('servings');
+  document.getElementById('labelEquipment').textContent = t('equipment');
+  document.getElementById('labelNutrition').textContent = t('nutrition');
+  document.getElementById('addEquipmentBtn').textContent = '+ ' + t('equipment');
 }
 
 // === Load & Render ===
 async function loadAndRender() {
   await fetchRecipes();
+
+  // Pre-translate titles for non-HE/EN languages before rendering
+  if (lang !== 'he' && lang !== 'en') {
+    await Promise.all(recipes.map(r => getRecipeField(r, 'title')));
+  }
+
   renderRecipes();
   renderFilterLabels();
 }
 
 // === Init ===
 async function init() {
+  // Read language from cookie
+  const savedLang = getCookie('lang');
+  if (savedLang && LANGUAGES.find(l => l.code === savedLang)) {
+    lang = savedLang;
+    document.getElementById('langSelect').value = lang;
+    const dir = getLangDir(lang);
+    document.documentElement.setAttribute('dir', dir);
+    document.documentElement.setAttribute('lang', lang);
+  }
+
   await loadTranslations(lang);
+  updateUIText();
   await fetchLabels();
   await loadAndRender();
 
@@ -947,6 +1239,15 @@ async function init() {
   document.getElementById('addLabelBtn').addEventListener('click', addNewLabel);
   document.getElementById('formTried').addEventListener('change', updateRatingState);
   document.getElementById('addIngredientBtn').addEventListener('click', () => addIngredientRow());
+  document.getElementById('addEquipmentBtn').addEventListener('click', () => addEquipmentRow());
+
+  // Nutrition toggle
+  document.getElementById('nutritionToggle').addEventListener('click', () => {
+    const fields = document.getElementById('nutritionFields');
+    const chevron = document.getElementById('nutritionChevron');
+    fields.classList.toggle('hidden');
+    chevron.style.transform = fields.classList.contains('hidden') ? '' : 'rotate(180deg)';
+  });
 
   // Tab switching
   document.querySelectorAll('.form-tab').forEach(tab => {
@@ -1003,5 +1304,6 @@ async function init() {
 window.openEditForm = openEditForm;
 window.deleteRecipe = deleteRecipe;
 window.removeIngredientRow = removeIngredientRow;
+window.removeEquipmentRow = removeEquipmentRow;
 
 init();

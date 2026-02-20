@@ -28,6 +28,13 @@ db.exec(`
     image_url TEXT DEFAULT '',
     tried INTEGER DEFAULT 0,
     rating REAL,
+    nutrition TEXT DEFAULT '{}',
+    prep_time INTEGER,
+    cook_time INTEGER,
+    servings INTEGER,
+    course TEXT DEFAULT '',
+    cuisine TEXT DEFAULT '',
+    equipment TEXT DEFAULT '[]',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -39,6 +46,20 @@ db.exec(`
     FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
   );
 `);
+
+// Add new columns if they don't exist (for existing databases)
+const newColumns = [
+  ['nutrition', "TEXT DEFAULT '{}'"],
+  ['prep_time', 'INTEGER'],
+  ['cook_time', 'INTEGER'],
+  ['servings', 'INTEGER'],
+  ['course', "TEXT DEFAULT ''"],
+  ['cuisine', "TEXT DEFAULT ''"],
+  ['equipment', "TEXT DEFAULT '[]'"],
+];
+for (const [col, type] of newColumns) {
+  try { db.exec(`ALTER TABLE recipes ADD COLUMN ${col} ${type}`); } catch {}
+}
 
 // Seed labels if empty
 const labelCount = db.prepare('SELECT COUNT(*) as count FROM labels').get().count;
@@ -74,8 +95,8 @@ function ingr(qty, unit, name) {
 const recipeCount = db.prepare('SELECT COUNT(*) as count FROM recipes').get().count;
 if (recipeCount === 0) {
   const insertRecipe = db.prepare(`
-    INSERT INTO recipes (title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, tried, rating)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO recipes (title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, tried, rating, nutrition, prep_time, cook_time, servings, course, cuisine, equipment)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertRecipeLabel = db.prepare('INSERT INTO recipe_labels (recipe_id, label_id) VALUES (?, ?)');
 
@@ -97,7 +118,10 @@ if (recipeCount === 0) {
       ]),
       'מערבבים את המרכיבים היבשים. מוסיפים ביצים, חלב וחמאה מומסת. מטגנים על מחבת חמה עד שמופיעות בועות, הופכים ומטגנים עוד דקה.',
       'Mix dry ingredients. Add eggs, milk, and melted butter. Cook on a hot pan until bubbles appear, flip and cook another minute.',
-      1, 8
+      1, 8,
+      JSON.stringify({ calories: '227kcal', carbs: '28g', protein: '7g', fat: '10g', saturated_fat: '5g', fiber: '1g', sugar: '6g', sodium: '450mg', calcium: '150mg' }),
+      10, 15, 4, 'Breakfast', 'American',
+      JSON.stringify([{ qty: 1, name: 'large mixing bowl' }, { qty: 1, name: 'non-stick frying pan' }, { qty: 1, name: 'spatula' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Breakfast'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('American'));
@@ -118,7 +142,10 @@ if (recipeCount === 0) {
       ]),
       'מטגנים בשר טחון עם תבלינים. ממלאים טורטיות עם הבשר ומוסיפים תוספות לפי הטעם.',
       'Brown ground beef with spices. Fill tortillas with meat and add toppings to taste.',
-      1, 9.5
+      1, 9.5,
+      JSON.stringify({ calories: '385kcal', carbs: '24g', protein: '22g', fat: '23g', saturated_fat: '9g', fiber: '4g', sugar: '3g', sodium: '520mg', potassium: '450mg', calcium: '80mg', iron: '4mg' }),
+      15, 20, 4, 'Main Course', 'Mexican',
+      JSON.stringify([{ qty: 1, name: 'large frying pan' }, { qty: 1, name: 'cutting board' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Dinner'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Mexican'));
@@ -137,7 +164,10 @@ if (recipeCount === 0) {
       ]),
       'מבשלים פסטה. מטגנים פנצ\'טה. מערבבים ביצים עם פרמזן. מוסיפים את הפסטה החמה לפנצ\'טה ואז את תערובת הביצים.',
       'Cook pasta. Fry pancetta. Mix eggs with parmesan. Add hot pasta to pancetta, then toss with egg mixture.',
-      1, 9
+      1, 9,
+      JSON.stringify({ calories: '520kcal', carbs: '58g', protein: '25g', fat: '20g', saturated_fat: '8g', fiber: '2g', sugar: '2g', sodium: '890mg', calcium: '250mg', iron: '3mg' }),
+      10, 20, 4, 'Main Course', 'Italian',
+      JSON.stringify([{ qty: 1, name: 'large pot' }, { qty: 1, name: 'frying pan' }, { qty: 1, name: 'mixing bowl' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Dinner'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Italian'));
@@ -158,7 +188,10 @@ if (recipeCount === 0) {
       ]),
       'מכינים רוטב מאנשובי, שום, לימון, חרדל וביצה. קורעים חסה, מוסיפים קרוטונים ופרמזן ומערבבים עם הרוטב.',
       'Make dressing from anchovies, garlic, lemon, mustard, and egg. Tear lettuce, add croutons and parmesan, toss with dressing.',
-      1, 6.5
+      1, 6.5,
+      JSON.stringify({ calories: '320kcal', carbs: '15g', protein: '12g', fat: '24g', saturated_fat: '5g', mono_fat: '14g', fiber: '3g', sugar: '2g', sodium: '680mg', vitamin_a: '8500IU', vitamin_c: '18mg', calcium: '200mg', iron: '2mg' }),
+      20, 5, 2, 'Salad', 'Mediterranean',
+      JSON.stringify([{ qty: 1, name: 'large salad bowl' }, { qty: 1, name: 'small blender or mortar' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Lunch'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Mediterranean'));
@@ -177,7 +210,10 @@ if (recipeCount === 0) {
       ]),
       'שמים את כל המרכיבים בבלנדר וטוחנים עד לקבלת מרקם חלק.',
       'Put all ingredients in a blender and blend until smooth.',
-      1, 7.5
+      1, 7.5,
+      JSON.stringify({ calories: '195kcal', carbs: '42g', protein: '5g', fat: '2g', fiber: '3g', sugar: '35g', vitamin_c: '45mg', calcium: '150mg', potassium: '450mg' }),
+      5, 0, 2, 'Drink', 'International',
+      JSON.stringify([{ qty: 1, name: 'blender' }, { qty: 1, name: 'tall glass' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Drink'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Snack'));
@@ -198,7 +234,10 @@ if (recipeCount === 0) {
       ]),
       'טוחנים חומוס עם טחינה, לימון, שום וכמון. מוסיפים מים קרים בהדרגה עד לקבלת מרקם חלק וקרמי. מגישים עם שמן זית.',
       'Blend chickpeas with tahini, lemon, garlic, and cumin. Gradually add cold water until smooth and creamy. Serve with olive oil.',
-      1, 10
+      1, 10,
+      JSON.stringify({ calories: '166kcal', carbs: '14g', protein: '8g', fat: '10g', mono_fat: '5g', fiber: '4g', sugar: '1g', sodium: '300mg', potassium: '200mg', iron: '3mg', calcium: '50mg' }),
+      10, 0, 6, 'Appetizer', 'Mediterranean',
+      JSON.stringify([{ qty: 1, name: 'food processor' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Snack'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Mediterranean'));
@@ -219,7 +258,10 @@ if (recipeCount === 0) {
       ]),
       'מבשלים אורז סושי עם חומץ. פורסים על גיליון נורי, מוסיפים מילוי ומגלגלים. חותכים לפרוסות.',
       'Cook sushi rice with vinegar. Spread on nori sheet, add filling and roll. Cut into slices.',
-      0, null
+      0, null,
+      JSON.stringify({ calories: '350kcal', carbs: '45g', protein: '18g', fat: '12g', poly_fat: '4g', mono_fat: '5g', fiber: '3g', sugar: '2g', sodium: '750mg', potassium: '300mg', vitamin_a: '400IU', iron: '2mg' }),
+      30, 20, 4, 'Main Course', 'Japanese',
+      JSON.stringify([{ qty: 1, name: 'bamboo sushi mat' }, { qty: 1, name: 'rice cooker or pot' }, { qty: 1, name: 'sharp knife' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Dinner'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Asian'));
@@ -240,7 +282,10 @@ if (recipeCount === 0) {
       ]),
       'ממיסים שוקולד עם חמאה. מערבבים סוכר וביצים. מוסיפים קמח וקקאו. אופים ב-180 מעלות 25 דקות.',
       'Melt chocolate with butter. Mix sugar and eggs. Add flour and cocoa. Bake at 180°C for 25 minutes.',
-      1, 8.5
+      1, 8.5,
+      JSON.stringify({ calories: '410kcal', carbs: '45g', protein: '6g', fat: '24g', saturated_fat: '14g', fiber: '3g', sugar: '32g', sodium: '200mg', calcium: '40mg', iron: '4mg' }),
+      15, 25, 9, 'Dessert', 'American',
+      JSON.stringify([{ qty: 1, name: 'mixing bowl' }, { qty: 1, name: '9x13 inch baking pan' }, { qty: 1, name: 'saucepan' }])
     );
     insertRecipeLabel.run(r.lastInsertRowid, labelId('Dessert'));
     insertRecipeLabel.run(r.lastInsertRowid, labelId('American'));

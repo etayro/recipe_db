@@ -305,13 +305,13 @@ app.get('/api/recipes/:id', (req, res) => {
 });
 
 app.post('/api/recipes', (req, res) => {
-  const { title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, label_ids } = req.body;
+  const { title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, label_ids, nutrition, prep_time, cook_time, servings, course, cuisine, equipment } = req.body;
 
   if (!title_he && !title_en) return res.status(400).json({ error: 'At least one title is required' });
 
   const result = db.prepare(`
-    INSERT INTO recipes (title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO recipes (title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, nutrition, prep_time, cook_time, servings, course, cuisine, equipment)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     title_he || '', title_en || '',
     description_he || '', description_en || '',
@@ -320,7 +320,13 @@ app.post('/api/recipes', (req, res) => {
     instructions_he || '', instructions_en || '',
     image_url || '',
     tried ? 1 : 0,
-    tried && rating != null ? rating : null
+    tried && rating != null ? rating : null,
+    typeof nutrition === 'string' ? nutrition : JSON.stringify(nutrition || {}),
+    prep_time != null ? Number(prep_time) : null,
+    cook_time != null ? Number(cook_time) : null,
+    servings != null ? Number(servings) : null,
+    course || '', cuisine || '',
+    typeof equipment === 'string' ? equipment : JSON.stringify(equipment || [])
   );
 
   const recipeId = result.lastInsertRowid;
@@ -336,7 +342,7 @@ app.post('/api/recipes', (req, res) => {
 });
 
 app.put('/api/recipes/:id', (req, res) => {
-  const { title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, label_ids } = req.body;
+  const { title_he, title_en, description_he, description_en, ingredients_he, ingredients_en, instructions_he, instructions_en, image_url, tried, rating, label_ids, nutrition, prep_time, cook_time, servings, course, cuisine, equipment } = req.body;
 
   const existing = db.prepare('SELECT * FROM recipes WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Recipe not found' });
@@ -348,11 +354,19 @@ app.put('/api/recipes/:id', (req, res) => {
     ? (typeof ingredients_en === 'string' ? ingredients_en : JSON.stringify(ingredients_en))
     : existing.ingredients_en;
 
+  const nutVal = nutrition !== undefined
+    ? (typeof nutrition === 'string' ? nutrition : JSON.stringify(nutrition))
+    : existing.nutrition;
+  const equipVal = equipment !== undefined
+    ? (typeof equipment === 'string' ? equipment : JSON.stringify(equipment))
+    : existing.equipment;
+
   db.prepare(`
     UPDATE recipes SET
       title_he = ?, title_en = ?, description_he = ?, description_en = ?,
       ingredients_he = ?, ingredients_en = ?, instructions_he = ?, instructions_en = ?,
-      image_url = ?, tried = ?, rating = ?
+      image_url = ?, tried = ?, rating = ?,
+      nutrition = ?, prep_time = ?, cook_time = ?, servings = ?, course = ?, cuisine = ?, equipment = ?
     WHERE id = ?
   `).run(
     title_he ?? existing.title_he, title_en ?? existing.title_en,
@@ -362,6 +376,13 @@ app.put('/api/recipes/:id', (req, res) => {
     image_url ?? existing.image_url,
     tried !== undefined ? (tried ? 1 : 0) : existing.tried,
     tried && rating != null ? rating : (tried === false ? null : existing.rating),
+    nutVal,
+    prep_time !== undefined ? (prep_time != null ? Number(prep_time) : null) : existing.prep_time,
+    cook_time !== undefined ? (cook_time != null ? Number(cook_time) : null) : existing.cook_time,
+    servings !== undefined ? (servings != null ? Number(servings) : null) : existing.servings,
+    course ?? existing.course,
+    cuisine ?? existing.cuisine,
+    equipVal,
     req.params.id
   );
 
